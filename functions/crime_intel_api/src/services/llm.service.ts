@@ -1,13 +1,13 @@
 import { LLMService } from '../core/services';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 export class GeminiLLMService implements LLMService {
-  private ai: GoogleGenerativeAI | null = null;
+  private ai: GoogleGenAI | null = null;
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      this.ai = new GoogleGenerativeAI(apiKey);
+      this.ai = new GoogleGenAI({ apiKey });
       console.log('Gemini LLM Service initialized with API Key.');
     } else {
       console.warn('GEMINI_API_KEY is not defined. Falling back to local offline mock LLM.');
@@ -17,14 +17,19 @@ export class GeminiLLMService implements LLMService {
   async generateText(prompt: string, systemInstruction?: string): Promise<string> {
     if (this.ai) {
       try {
-        const modelName = 'gemini-2.5-flash';
-        const model = this.ai.getGenerativeModel({
+        const modelName = 'gemini-3.5-flash-lite';
+        const response = await this.ai.models.generateContent({
           model: modelName,
-          systemInstruction: systemInstruction,
+          contents: prompt,
+          config: {
+            systemInstruction: systemInstruction,
+          }
         });
-
-        const response = await model.generateContent(prompt);
-        return response.response.text();
+        console.log("Prompt:\n")
+        console.log(prompt)
+        console.log("Response:\n")
+        console.log(response.text)
+        return response.text || '';
       } catch (error) {
         console.error('Error in Gemini LLM generation:', error);
         return this.generateOfflineMockResponse(prompt, systemInstruction);

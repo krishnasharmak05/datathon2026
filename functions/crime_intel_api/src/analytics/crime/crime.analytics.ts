@@ -5,7 +5,10 @@ export class CrimeAnalytics {
     districtId?: number;
     unitId?: number;
     crimeHeadId?: number;
+    crimeSubHeadId?: number;
     year?: number;
+    startDate?: string;
+    endDate?: string;
   }) {
     const count = await caseRepository.count(params);
     return { count };
@@ -15,7 +18,10 @@ export class CrimeAnalytics {
     districtId?: number;
     unitId?: number;
     crimeHeadId?: number;
+    crimeSubHeadId?: number;
     year?: number;
+    startDate?: string;
+    endDate?: string;
   }) {
     const cases = await caseRepository.list(params);
     return cases.slice(0, 50); // Cap list view for performance

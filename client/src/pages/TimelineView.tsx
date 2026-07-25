@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { submitQuery } from '../api/client';
+import { fetchCaseTimeline } from '../api/client';
 import { Search, Calendar, FileText, User, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
 
 export default function TimelineView() {
@@ -15,7 +15,7 @@ export default function TimelineView() {
     setEvents([]);
 
     try {
-      const response = await submitQuery(`show timeline progression for case ${caseNo}`);
+      const response = await fetchCaseTimeline(caseNo);
       if (response.data && response.data.events) {
         setEvents(response.data.events);
       } else {

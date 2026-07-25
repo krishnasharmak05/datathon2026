@@ -1,5 +1,8 @@
 import { getDbConnection } from './connection';
 import * as repos from '../core/repos';
+import { DeterministicSQLGenerator } from '../parser/sql_generator';
+
+const sqlGenerator = new DeterministicSQLGenerator();
 
 // Thread-safe or static execution trace for explainability
 export class SqlTracer {
@@ -42,49 +45,28 @@ export class SQLiteCaseRepository implements repos.CaseRepository {
 
   async getByCrimeNo(crimeNo: string): Promise<repos.Case | null> {
     const db = await getDbConnection();
-    const sql = `SELECT * FROM CaseMaster WHERE CrimeNo = ? OR CaseNo = ?`;
-    SqlTracer.trace(sql, [crimeNo, crimeNo]);
-    const row = await db.get(sql, [crimeNo, crimeNo]);
+    const sql = `
+      SELECT * FROM CaseMaster 
+      WHERE CrimeNo = ? OR CaseNo = ?
+      OR CaseMasterID IN (
+        SELECT CaseMasterID FROM Accused WHERE PersonID = ?
+      )
+    `;
+    SqlTracer.trace(sql, [crimeNo, crimeNo, crimeNo]);
+    const row = await db.get(sql, [crimeNo, crimeNo, crimeNo]);
     if (row) SqlTracer.addRows(1);
     return row || null;
   }
 
-  async list(filter?: {
-    districtId?: number;
-    unitId?: number;
-    crimeHeadId?: number;
-    year?: number;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<repos.Case[]> {
+  async list(filter?: any): Promise<repos.Case[]> {
     const db = await getDbConnection();
-    let sql = `SELECT * FROM CaseMaster WHERE 1=1`;
-    const params: any[] = [];
-
-    if (filter?.districtId) {
-      sql += ` AND PoliceStationID IN (SELECT UnitID FROM Unit WHERE DistrictID = ?)`;
-      params.push(filter.districtId);
-    }
-    if (filter?.unitId) {
-      sql += ` AND PoliceStationID = ?`;
-      params.push(filter.unitId);
-    }
-    if (filter?.crimeHeadId) {
-      sql += ` AND CrimeMajorHeadID = ?`;
-      params.push(filter.crimeHeadId);
-    }
-    if (filter?.year) {
-      sql += ` AND strftime('%Y', CrimeRegisteredDate) = ?`;
-      params.push(String(filter.year));
-    }
-    if (filter?.startDate) {
-      sql += ` AND CrimeRegisteredDate >= ?`;
-      params.push(filter.startDate);
-    }
-    if (filter?.endDate) {
-      sql += ` AND CrimeRegisteredDate <= ?`;
-      params.push(filter.endDate);
-    }
+    const generated = sqlGenerator.generate({
+      intent: 'LIST',
+      entities: filter || {},
+      confidence: 1.0,
+      pipelineStage: 'deterministic'
+    });
+    const { sql, params } = generated;
 
     SqlTracer.trace(sql, params);
     const rows = await db.all(sql, params);
@@ -92,32 +74,15 @@ export class SQLiteCaseRepository implements repos.CaseRepository {
     return rows;
   }
 
-  async count(filter?: {
-    districtId?: number;
-    unitId?: number;
-    crimeHeadId?: number;
-    year?: number;
-  }): Promise<number> {
+  async count(filter?: any): Promise<number> {
     const db = await getDbConnection();
-    let sql = `SELECT COUNT(*) as count FROM CaseMaster WHERE 1=1`;
-    const params: any[] = [];
-
-    if (filter?.districtId) {
-      sql += ` AND PoliceStationID IN (SELECT UnitID FROM Unit WHERE DistrictID = ?)`;
-      params.push(filter.districtId);
-    }
-    if (filter?.unitId) {
-      sql += ` AND PoliceStationID = ?`;
-      params.push(filter.unitId);
-    }
-    if (filter?.crimeHeadId) {
-      sql += ` AND CrimeMajorHeadID = ?`;
-      params.push(filter.crimeHeadId);
-    }
-    if (filter?.year) {
-      sql += ` AND strftime('%Y', CrimeRegisteredDate) = ?`;
-      params.push(String(filter.year));
-    }
+    const generated = sqlGenerator.generate({
+      intent: 'COUNT',
+      entities: filter || {},
+      confidence: 1.0,
+      pipelineStage: 'deterministic'
+    });
+    const { sql, params } = generated;
 
     SqlTracer.trace(sql, params);
     const result = await db.get(sql, params);
@@ -440,9 +405,12 @@ export class SQLiteAnalyticsRepository implements repos.AnalyticsRepository {
       LEFT JOIN CrimeHead ch ON c.CrimeMajorHeadID = ch.CrimeHeadID
       LEFT JOIN CrimeSubHead csh ON c.CrimeMinorHeadID = csh.CrimeSubHeadID
       WHERE c.CrimeNo = ? OR c.CaseNo = ?
+      OR c.CaseMasterID IN (
+        SELECT CaseMasterID FROM Accused WHERE PersonID = ?
+      )
     `;
-    SqlTracer.trace(sql, [caseNoOrCrimeNo, caseNoOrCrimeNo]);
-    const caseDetails = await db.get(sql, [caseNoOrCrimeNo, caseNoOrCrimeNo]);
+    SqlTracer.trace(sql, [caseNoOrCrimeNo, caseNoOrCrimeNo, caseNoOrCrimeNo]);
+    const caseDetails = await db.get(sql, [caseNoOrCrimeNo, caseNoOrCrimeNo, caseNoOrCrimeNo]);
     if (!caseDetails) return [];
     
     SqlTracer.addRows(1);
@@ -591,29 +559,49 @@ export class SQLiteAnalyticsRepository implements repos.AnalyticsRepository {
     return rows;
   }
 
-  async getNetworkData(accusedName: string): Promise<{
-    nodes: { id: string; label: string; type: string }[];
-    edges: { id: string; source: string; target: string; label: string }[];
-  }> {
+  async getNetworkData(accusedNameOrPersonId: string): Promise<any> {
     const db = await getDbConnection();
     
-    // Find all cases linked to this accused name or PersonID
-    const accusedSql = `SELECT DISTINCT PersonID, AccusedName FROM Accused WHERE AccusedName LIKE ?`;
-    SqlTracer.trace(accusedSql, [`%${accusedName}%`]);
-    const matchedAccused = await db.all(accusedSql, [`%${accusedName}%`]);
-    SqlTracer.addRows(matchedAccused.length);
+    // Check if direct PersonID
+    const pidSql = `SELECT DISTINCT PersonID, AccusedName FROM Accused WHERE PersonID = ?`;
+    SqlTracer.trace(pidSql, [accusedNameOrPersonId]);
+    const pidMatches = await db.all(pidSql, [accusedNameOrPersonId]);
+    SqlTracer.addRows(pidMatches.length);
+    
+    let matchedAccused = pidMatches;
+    if (matchedAccused.length === 0) {
+      // Treat as name search
+      const accusedSql = `SELECT DISTINCT PersonID, AccusedName FROM Accused WHERE AccusedName LIKE ?`;
+      SqlTracer.trace(accusedSql, [`%${accusedNameOrPersonId}%`]);
+      matchedAccused = await db.all(accusedSql, [`%${accusedNameOrPersonId}%`]);
+      SqlTracer.addRows(matchedAccused.length);
+    }
     
     if (matchedAccused.length === 0) {
       return { nodes: [], edges: [] };
     }
+    
+    const uniquePids = Array.from(new Set(matchedAccused.map(m => m.PersonID)));
+    if (uniquePids.length > 1) {
+      const optionsMap = new Map<string, string>();
+      for (const item of matchedAccused) {
+        optionsMap.set(item.PersonID, item.AccusedName);
+      }
+      const options = Array.from(optionsMap.entries()).map(([personId, accusedName]) => ({ personId, accusedName }));
+      return {
+        status: 'conflict',
+        message: 'Multiple suspects found matching the name.',
+        options
+      };
+    }
 
     const nodesMap = new Map<string, { id: string; label: string; type: string }>();
     const edgesList: { id: string; source: string; target: string; label: string }[] = [];
-
+    
     // Helper to generate edge ID
     const getEdgeId = (s: string, t: string) => s < t ? `${s}-${t}` : `${t}-${s}`;
     const addedEdges = new Set<string>();
-
+    
     for (const targetAcc of matchedAccused) {
       const pid = targetAcc.PersonID;
       
@@ -632,6 +620,27 @@ export class SQLiteAnalyticsRepository implements repos.AnalyticsRepository {
       SqlTracer.trace(casesSql, [pid]);
       const cases = await db.all(casesSql, [pid]);
       SqlTracer.addRows(cases.length);
+
+      // Pre-fetch victims to count occurrences and identify overlap
+      const caseVictimsMap = new Map<number, string[]>();
+      const victimCounts = new Map<string, number>();
+
+      for (const cs of cases) {
+        const victimsSql = `
+          SELECT VictimName 
+          FROM Victim 
+          WHERE CaseMasterID = ?
+        `;
+        SqlTracer.trace(victimsSql, [cs.CaseMasterID]);
+        const victims = await db.all(victimsSql, [cs.CaseMasterID]);
+        SqlTracer.addRows(victims.length);
+        
+        const names = victims.map(v => v.VictimName);
+        caseVictimsMap.set(cs.CaseMasterID, names);
+        for (const name of names) {
+          victimCounts.set(name, (victimCounts.get(name) || 0) + 1);
+        }
+      }
 
       for (const cs of cases) {
         const caseNodeId = `CASE-${cs.CaseMasterID}`;
@@ -653,6 +662,32 @@ export class SQLiteAnalyticsRepository implements repos.AnalyticsRepository {
         if (!addedEdges.has(offEdgeId)) {
           edgesList.push({ id: offEdgeId, source: officerNodeId, target: caseNodeId, label: 'investigates' });
           addedEdges.add(offEdgeId);
+        }
+
+        // Victim Nodes
+        const caseVictims = caseVictimsMap.get(cs.CaseMasterID) || [];
+        for (const vName of caseVictims) {
+          const count = victimCounts.get(vName) || 0;
+          const isOverlap = count > 1;
+          const victimNodeId = `VICTIM-${vName}`;
+          
+          nodesMap.set(victimNodeId, {
+            id: victimNodeId,
+            label: vName,
+            type: isOverlap ? 'victim-overlap' : 'victim'
+          });
+
+          // Case -> Victim Edge
+          const vEdgeId = getEdgeId(caseNodeId, victimNodeId);
+          if (!addedEdges.has(vEdgeId)) {
+            edgesList.push({
+              id: vEdgeId,
+              source: caseNodeId,
+              target: victimNodeId,
+              label: 'victim in'
+            });
+            addedEdges.add(vEdgeId);
+          }
         }
 
         // Fetch other co-accused in this same case

@@ -14,10 +14,7 @@ export class ExecutionPlanner {
           module: 'crime',
           action: 'getCrimeCount',
           params: {
-            districtId: entities.districtId,
-            unitId: entities.unitId,
-            crimeHeadId: entities.crimeHeadId,
-            year: entities.year
+            ...entities
           }
         });
         break;
@@ -28,10 +25,7 @@ export class ExecutionPlanner {
           module: 'crime',
           action: 'listCases',
           params: {
-            districtId: entities.districtId,
-            unitId: entities.unitId,
-            crimeHeadId: entities.crimeHeadId,
-            year: entities.year
+            ...entities
           }
         });
         break;

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { submitQuery } from '../api/client';
+import { fetchHotspots } from '../api/client';
 import { MapPin, ShieldAlert, Sliders } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -62,11 +62,7 @@ export default function MapView() {
     layerGroupRef.current.clearLayers();
 
     try {
-      const q = crimeHeadId 
-        ? `detect hotspot crimes for category ${CRIME_CATEGORIES.find(c => c.id === crimeHeadId)?.name}`
-        : 'detect hotspot crimes across Karnataka';
-
-      const response = await submitQuery(q);
+      const response = await fetchHotspots(crimeHeadId);
       const data = response.data;
 
       if (data && data.hotspots) {

@@ -5,6 +5,8 @@ import { llmService, embeddingService } from '../services';
 import { ApiResponse } from './pipeline';
 import { SqlTracer } from '../db/sqlite.repo';
 
+import { analyticsRepository } from '../db';
+
 // Import analytics modules
 import { CrimeAnalytics } from '../analytics/crime/crime.analytics';
 import { TrendAnalytics } from '../analytics/trends/trends.analytics';
@@ -23,15 +25,15 @@ export class ConversationOrchestrator {
   // Instantiate analytics services
   private crime = new CrimeAnalytics();
   private trends = new TrendAnalytics();
-  private hotspot = new HotspotAnalytics();
+  public hotspot = new HotspotAnalytics();
   private demographics = new DemographicAnalytics();
   private comparison = new ComparisonAnalytics();
   private timeline = new TimelineAnalytics();
-  private profiling = new ProfilingAnalytics();
+  public profiling = new ProfilingAnalytics();
   private prediction = new PredictionAnalytics();
   private reporting = new ReportingAnalytics();
 
-  async processQuery(query: string, language: 'en' | 'kn' = 'en'): Promise<ApiResponse> {
+  async processQuery(query: string, language: 'en' | 'kn' = 'en', isTerminal?: boolean): Promise<ApiResponse> {
     const startTime = Date.now();
     SqlTracer.clear();
 
@@ -89,6 +91,12 @@ export class ConversationOrchestrator {
             }
             break;
 
+          case 'network':
+            if (step.action === 'getAccusedNetwork') {
+              finalData = await analyticsRepository.getNetworkData(step.params.name);
+            }
+            break;
+
           case 'profiling':
             if (step.action === 'getAccusedProfile') {
               finalData = await this.profiling.getAccusedProfile(step.params);
@@ -124,7 +132,8 @@ export class ConversationOrchestrator {
         parsedQuery,
         finalData || { message: 'Query completed with no additional details.' },
         executionTime,
-        language
+        language,
+        isTerminal
       );
 
       return response;

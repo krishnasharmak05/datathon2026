@@ -61,3 +61,44 @@ body {
   animation: pulse-glow 2s infinite;
   border-radius: 50%;
 }
+
+/* Markdown Content Styling for Query Terminal */
+.markdown-content p {
+  margin-bottom: 0.75rem;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+.markdown-content ul, .markdown-content ol {
+  margin-left: 1.25rem;
+  margin-bottom: 0.75rem;
+  list-style-type: disc;
+}
+.markdown-content ol {
+  list-style-type: decimal;
+}
+.markdown-content li {
+  margin-bottom: 0.25rem;
+}
+.markdown-content strong {
+  font-weight: 700;
+  color: #FFFFFF;
+}
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+  font-size: 0.825rem;
+}
+.markdown-content th, .markdown-content td {
+  border: 1px solid #1F2E45;
+  padding: 0.5rem;
+  text-align: left;
+}
+.markdown-content th {
+  background-color: #111A2E;
+  color: #00F0FF;
+}
+.markdown-content tr:nth-child(even) {
+  background-color: #0F172A;
+}

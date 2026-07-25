@@ -4,7 +4,10 @@ import { accusedRepository, analyticsRepository } from '../../db';
 export class PredictionAnalytics {
   
   async predictRecidivism(params: { name: string }) {
-    const matches = await accusedRepository.searchByName(params.name);
+    let matches = await accusedRepository.getByPersonId(params.name);
+    if (!matches || matches.length === 0) {
+      matches = await accusedRepository.searchByName(params.name);
+    }
     if (matches.length === 0) {
       return { error: `No accused record found matching: "${params.name}"` };
     }
