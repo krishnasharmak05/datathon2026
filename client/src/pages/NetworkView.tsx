@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { submitQuery } from '../api/client';
+import { fetchAccusedNetwork, fetchAccusedProfile } from '../api/client';
 import cytoscape from 'cytoscape';
 import { Search, Network, User, ShieldAlert, Cpu } from 'lucide-react';
 
@@ -7,24 +7,42 @@ export default function NetworkView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
 
-  const [accusedName, setAccusedName] = useState('Rajesh');
+  const [accusedName, setAccusedName] = useState('ACC-R-1');
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [conflictOptions, setConflictOptions] = useState<any[]>([]);
 
-  const fetchAndRenderNetwork = async () => {
+  const fetchAndRenderNetwork = async (personIdOverride?: string) => {
     if (!containerRef.current) return;
     
     setLoading(true);
     setProfile(null);
+    setConflictOptions([]);
 
     try {
       // 1. Fetch graph node-link data from api orchestrator
-      const response = await submitQuery(`show criminal network for accused ${accusedName}`);
+      const response = personIdOverride 
+        ? await fetchAccusedNetwork('', personIdOverride)
+        : await fetchAccusedNetwork(accusedName);
+
+      if (response.status === 'conflict') {
+        setConflictOptions(response.options);
+        if (cyRef.current) {
+          cyRef.current.destroy();
+          cyRef.current = null;
+        }
+        setLoading(false);
+        return;
+      }
+      
       const data = response.data;
 
       // 2. Fetch the corresponding offender behavioral profile in parallel
-      const profileResponse = await submitQuery(`generate behavioral profile for accused ${accusedName}`);
-      if (!profileResponse.data.error) {
+      const profileResponse = personIdOverride 
+        ? await fetchAccusedProfile('', personIdOverride)
+        : await fetchAccusedProfile(accusedName);
+
+      if (profileResponse.status === 'success' && !profileResponse.data.error) {
         setProfile(profileResponse.data);
       }
 
@@ -108,6 +126,26 @@ export default function NetworkView() {
             }
           },
           {
+            selector: 'node[type="victim"]',
+            style: {
+              'background-color': '#10B981',
+              'shape': 'diamond',
+              'width': '22px',
+              'height': '22px'
+            }
+          },
+          {
+            selector: 'node[type="victim-overlap"]',
+            style: {
+              'background-color': '#EC4899',
+              'shape': 'diamond',
+              'width': '26px',
+              'height': '26px',
+              'border-color': '#FFF',
+              'border-width': '2px'
+            }
+          },
+          {
             selector: 'edge',
             style: {
               'width': 1.5,
@@ -161,12 +199,12 @@ export default function NetworkView() {
               type="text"
               value={accusedName}
               onChange={(e) => setAccusedName(e.target.value)}
-              placeholder="Enter Accused Name..."
+              placeholder="Enter Name, ID, Crime or Case No..."
               className="flex-1 bg-[#0B111E] border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-police-accent"
               onKeyDown={(e) => e.key === 'Enter' && fetchAndRenderNetwork()}
             />
             <button
-              onClick={fetchAndRenderNetwork}
+              onClick={() => fetchAndRenderNetwork()}
               className="p-2 bg-police-accent text-white rounded-lg hover:bg-police-accent/80 transition-all"
             >
               <Search size={14} />
@@ -174,7 +212,33 @@ export default function NetworkView() {
           </div>
 
           {/* Profile Overview (if loaded) */}
-          {profile ? (
+          {conflictOptions.length > 0 ? (
+            <div className="space-y-3 text-xs">
+              <div className="bg-[#0B111E] p-3 rounded-lg border border-yellow-500/20 space-y-2">
+                <p className="text-[10px] text-yellow-500 uppercase font-bold flex items-center gap-1">
+                  <ShieldAlert className="text-yellow-500" size={12} /> Multiple Suspects Found
+                </p>
+                <p className="text-slate-400 text-[10px] leading-relaxed">
+                  Multiple suspects match this name. Please select the correct Person ID:
+                </p>
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  {conflictOptions.map((opt: any, idx: number) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setAccusedName(opt.personId);
+                        fetchAndRenderNetwork(opt.personId);
+                      }}
+                      className="w-full text-left p-2 rounded bg-[#161F30] border border-slate-800 hover:border-police-glow hover:bg-police-accent/10 transition-all text-white text-[10px] flex justify-between items-center"
+                    >
+                      <span className="font-semibold">{opt.accusedName}</span>
+                      <span className="text-slate-500 font-mono text-[9px]">{opt.personId}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : profile ? (
             <div className="space-y-3 text-xs">
               <div className="bg-[#0B111E] p-3 rounded-lg border border-slate-800 space-y-2">
                 <p className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
@@ -187,8 +251,24 @@ export default function NetworkView() {
                   <p className="text-slate-200"><b>Preferred Crime:</b> {profile.preferredCrime}</p>
                   <p className="text-slate-200"><b>Preferred spot:</b> {profile.preferredLocation}</p>
                   <p className="text-slate-200"><b>Active Span:</b> {profile.activeYearsSpan}</p>
-                  {profile.victimOverlap.length > 0 && (
-                    <p className="text-rose-400 font-bold"><b>Victim Overlap:</b> {profile.victimOverlap.join(', ')}</p>
+                  {profile.victimOverlap && profile.victimOverlap.length > 0 && (
+                    <div className="space-y-1.5 mt-2 pt-2 border-t border-slate-800 text-[10px]">
+                      <p className="text-[10px] text-rose-400 font-bold uppercase tracking-wide">Victim Overlap Details</p>
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                        {profile.victimOverlap.map((overlap: any, idx: number) => (
+                          <div key={idx} className="bg-[#1C1420] border border-rose-500/20 p-2 rounded text-[10px] space-y-1 text-slate-300">
+                            <p className="text-rose-400 font-bold">{overlap.victimName}</p>
+                            <div className="pl-2 border-l border-rose-500/20 space-y-0.5 text-[9px] text-slate-400 font-mono">
+                              {overlap.cases.map((c: any, cIdx: number) => (
+                                <div key={cIdx} className="truncate">
+                                  • <span className="font-semibold text-slate-200">{c.stationName}</span> ({c.date})
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -197,7 +277,7 @@ export default function NetworkView() {
               <div className="space-y-2">
                 <p className="text-[10px] text-slate-400 uppercase font-bold">Offence History</p>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {profile.offenceHistory.map((off: any, idx: number) => (
+                  {profile.offenceHistory && profile.offenceHistory.map((off: any, idx: number) => (
                     <div key={idx} className="bg-[#0B111E] p-2 rounded border border-slate-850 text-[10px] space-y-1">
                       <p className="text-white font-bold">{off.crimeNo} ({off.date})</p>
                       <p className="text-slate-400 text-[9px]">{off.briefFacts}</p>
@@ -209,7 +289,7 @@ export default function NetworkView() {
           ) : (
             !loading && (
               <div className="bg-[#0B111E] p-4 rounded-lg border border-slate-800 text-center text-slate-500 text-xs">
-                No active offender profile loaded. Search a name to compute metrics.
+                No active offender profile loaded. Search a name, ID, or Case/Crime No to compute metrics.
               </div>
             )
           )}
@@ -230,6 +310,14 @@ export default function NetworkView() {
           <div className="flex items-center gap-2 text-slate-300">
             <span className="w-2.5 h-2.5 rounded-sm bg-[#2A75D3]"></span>
             <span>Investigating Officers</span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-2.5 h-2.5 bg-[#10B981] transform rotate-45 inline-block"></span>
+            <span>Victims</span>
+          </div>
+          <div className="flex items-center gap-2 text-rose-400 font-bold">
+            <span className="w-2.5 h-2.5 bg-[#EC4899] border border-white transform rotate-45 inline-block"></span>
+            <span>Victim Overlap</span>
           </div>
         </div>
       </div>

@@ -1,23 +1,28 @@
 import { EmbeddingService } from '../core/services';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 export class GeminiEmbeddingService implements EmbeddingService {
-  private ai: GoogleGenerativeAI | null = null;
+  private ai: GoogleGenAI | null = null;
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      this.ai = new GoogleGenerativeAI(apiKey);
+      this.ai = new GoogleGenAI({ apiKey });
     }
   }
 
   async getEmbedding(text: string): Promise<number[]> {
     if (this.ai) {
       try {
-        const model = this.ai.getGenerativeModel({ model: 'text-embedding-004' });
-        const result = await model.embedContent(text);
-        if (result.embedding && result.embedding.values) {
-          return result.embedding.values;
+        const result = await this.ai.models.embedContent({
+          model: 'gemini-embedding-2',
+          contents: text,
+        });
+        if (result.embeddings && result.embeddings[0] && result.embeddings[0].values) {
+          return result.embeddings[0].values;
+        }
+        if ((result as any).embedding && (result as any).embedding.values) {
+          return (result as any).embedding.values;
         }
       } catch (error) {
         console.error('Error fetching Gemini embedding:', error);

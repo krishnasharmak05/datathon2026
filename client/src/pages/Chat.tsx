@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { submitQuery } from '../api/client';
 import type { QueryResponse } from '../api/client';
-import { 
-  Send, Mic, MicOff, Volume2, VolumeX, ShieldAlert, Cpu, 
+import {
+  Send, Mic, MicOff, Volume2, VolumeX, ShieldAlert, Cpu,
   Terminal, Database, Clock, Zap, HelpCircle, CornerDownLeft
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -22,7 +23,8 @@ export default function Chat({ onSwitchTab }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'system',
-      text: "Karnataka Police Cyber Command Intelligence Bot initialized. Enter a command or query. (English & Kannada supported)"
+      text: "Karnataka Police Cyber Command Intelligence Bot initialized. Enter a command or query. (English & Kannada supported)",
+      language: 'en'
     }
   ]);
   const [input, setInput] = useState('');
@@ -34,41 +36,94 @@ export default function Chat({ onSwitchTab }: ChatProps) {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const initialInputRef = useRef<string>('');
+  const speechInputLanguageRef = useRef<'en' | 'kn' | null>(null);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Dynamically translate greeting message when language changes
+  useEffect(() => {
+    setMessages(prev => {
+      if (prev.length === 0) return prev;
+      const firstMsg = prev[0];
+      if (
+        firstMsg.sender === 'system' &&
+        (firstMsg.text.startsWith("Karnataka Police Cyber Command") ||
+         firstMsg.text.startsWith("ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಸೈಬರ್ ಕಮಾಂಡ್"))
+      ) {
+        const updated = [...prev];
+        updated[0] = {
+          ...firstMsg,
+          text: language === 'kn'
+            ? "ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಸೈಬರ್ ಕಮಾಂಡ್ ಇಂಟೆಲಿಜೆನ್ಸ್ ಬಾಟ್ ಕಾರ್ಯಾರಂಭಿಸಿದೆ. ದಯವಿಟ್ಟು ಕಮಾಂಡ್ ಅಥವಾ ಪ್ರಶ್ನೆಯನ್ನು ನಮೂದಿಸಿ. (ಇಂಗ್ಲಿಷ್ ಮತ್ತು ಕನ್ನಡ ಬೆಂಬಲಿತವಾಗಿದೆ)"
+            : "Karnataka Police Cyber Command Intelligence Bot initialized. Enter a command or query. (English & Kannada supported)",
+          language: language
+        };
+        return updated;
+      }
+      return prev;
+    });
+  }, [language]);
+
   // Speech Recognition Setup
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    let rec: any = null;
     if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      
+      rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+
       rec.onstart = () => {
         setIsListening(true);
+        setVoiceEnabled(true);
       };
-      
+
       rec.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
-        handleSend(transcript);
+        let sessionTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          sessionTranscript += event.results[i][0].transcript;
+        }
+        const prefix = initialInputRef.current;
+        setInput(prefix + (prefix && !prefix.endsWith(' ') ? ' ' : '') + sessionTranscript);
+        speechInputLanguageRef.current = language;
       };
-      
+
       rec.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error);
         setIsListening(false);
+        let msg = '';
+        if (event.error === 'not-allowed') {
+          msg = "Microphone access blocked. Please enable microphone permissions in your browser settings.";
+        } else if (event.error === 'no-speech') {
+          msg = "No speech was detected. Please try speaking again.";
+        } else if (event.error === 'audio-capture') {
+          msg = "No microphone detected. Please plug in a microphone and try again.";
+        } else {
+          msg = `Speech recognition error: ${event.error}`;
+        }
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: `⚠️ ${msg}`,
+          language: 'en'
+        }]);
       };
-      
+
       rec.onend = () => {
         setIsListening(false);
       };
-      
+
       recognitionRef.current = rec;
     }
+
+    return () => {
+      if (rec) {
+        rec.stop();
+      }
+    };
   }, [language]);
 
   const toggleListening = () => {
@@ -76,6 +131,7 @@ export default function Chat({ onSwitchTab }: ChatProps) {
       recognitionRef.current?.stop();
     } else {
       if (recognitionRef.current) {
+        initialInputRef.current = input;
         recognitionRef.current.lang = language === 'kn' ? 'kn-IN' : 'en-IN';
         recognitionRef.current.start();
       } else {
@@ -85,30 +141,63 @@ export default function Chat({ onSwitchTab }: ChatProps) {
   };
 
   // Text to Speech
-  const speakText = (text: string) => {
-    if (!voiceEnabled) return;
+  const speakMessage = (text: string, speakLang?: 'en' | 'kn') => {
     window.speechSynthesis.cancel(); // Cancel any ongoing speech
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = language === 'kn' ? 'kn-IN' : 'en-IN';
+    
+    // Clean markdown characters
+    const cleanText = text.replace(/[*#_`~•-]/g, '').trim();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    const finalLang = speakLang || language;
+    const targetLang = finalLang === 'kn' ? 'kn-IN' : 'en-IN';
+    utterance.lang = targetLang;
+
+    const voices = window.speechSynthesis.getVoices();
+    let voice: SpeechSynthesisVoice | undefined;
+    if (finalLang === 'kn') {
+      voice = voices.find(v => v.lang === 'kn-IN') ||
+              voices.find(v => v.lang.toLowerCase().startsWith('kn')) ||
+              voices.find(v => v.name.toLowerCase().includes('kannada'));
+    } else {
+      voice = voices.find(v => v.lang === 'en-IN') ||
+              voices.find(v => v.lang.toLowerCase().startsWith('en'));
+    }
+
+    if (voice) {
+      utterance.voice = voice;
+    }
     window.speechSynthesis.speak(utterance);
+  };
+
+  const speakText = (text: string, speakLang?: 'en' | 'kn') => {
+    if (!voiceEnabled) return;
+    speakMessage(text, speakLang);
   };
 
   const handleSend = async (textToSend?: string) => {
     const queryText = textToSend || input;
     if (!queryText.trim()) return;
 
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+
+    // Determine the language of the input
+    const inputLang = speechInputLanguageRef.current || (/[\u0C80-\u0CFF]/.test(queryText) ? 'kn' : language);
+
     setLoading(true);
     setInput('');
+    speechInputLanguageRef.current = null; // Reset tracking
 
     // Append User Message
-    setMessages(prev => [...prev, { sender: 'user', text: queryText }]);
+    setMessages(prev => [...prev, { sender: 'user', text: queryText, language: inputLang }]);
 
     try {
-      const response = await submitQuery(queryText, language);
-      
+      const response = await submitQuery(queryText, inputLang, true);
+
       const newMsg: Message = {
         sender: 'system',
         text: response.textResponse,
+        language: inputLang,
         data: response.data,
         metadata: response.metadata
       };
@@ -117,13 +206,14 @@ export default function Chat({ onSwitchTab }: ChatProps) {
       setSelectedMeta(response.metadata); // Load to debugger panel immediately
 
       // Speak response out loud if enabled
-      speakText(response.textResponse);
+      speakText(response.textResponse, inputLang);
 
     } catch (err: any) {
       console.error(err);
-      setMessages(prev => [...prev, { 
-        sender: 'system', 
-        text: "Error connecting to the intelligence server. Ensure SQLite database is seeded and backend port 5000 is listening." 
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: "Error connecting to the intelligence server. Ensure SQLite database is seeded and backend port 5000 is listening.",
+        language: 'en'
       }]);
     } finally {
       setLoading(false);
@@ -132,27 +222,27 @@ export default function Chat({ onSwitchTab }: ChatProps) {
 
   return (
     <div className="flex h-[calc(100vh-140px)] gap-6">
-      
+
       {/* Main Chat Panel */}
       <div className="flex-1 flex flex-col bg-police-card rounded-xl border border-slate-800 overflow-hidden">
-        
+
         {/* Chat Header */}
         <div className="p-4 border-b border-slate-800 bg-[#111A2E] flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Cpu className="text-police-glow h-5 w-5 animate-pulse" />
             <h2 className="text-sm font-bold text-white uppercase tracking-wider">Conversational Query Console</h2>
           </div>
-          
+
           <div className="flex items-center gap-3">
             {/* Language Switch */}
             <div className="flex bg-[#0B111E] rounded-lg p-0.5 border border-slate-800">
-              <button 
+              <button
                 onClick={() => setLanguage('en')}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${language === 'en' ? 'bg-police-accent text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 English
               </button>
-              <button 
+              <button
                 onClick={() => setLanguage('kn')}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${language === 'kn' ? 'bg-police-accent text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
@@ -178,18 +268,28 @@ export default function Chat({ onSwitchTab }: ChatProps) {
         <div className="flex-1 p-4 overflow-y-auto space-y-4">
           {messages.map((msg, index) => (
             <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-xl p-4 border ${
-                msg.sender === 'user' 
-                  ? 'bg-police-accent/10 border-police-accent/40 text-slate-100' 
+              <div className={`max-w-[80%] rounded-xl p-4 border ${msg.sender === 'user'
+                  ? 'bg-police-accent/10 border-police-accent/40 text-slate-100'
                   : 'bg-[#0B111E] border-slate-800 text-slate-200'
-              }`}>
+                }`}>
                 {/* Text Content */}
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                
+                <div className="flex justify-between items-start gap-4">
+                  <div className="text-sm leading-relaxed markdown-content flex-1">
+                    <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  </div>
+                  <button
+                    onClick={() => speakMessage(msg.text, msg.language)}
+                    className="p-1 rounded text-slate-500 hover:text-police-glow hover:bg-slate-800 transition-all self-start"
+                    title="Read aloud"
+                  >
+                    <Volume2 size={14} />
+                  </button>
+                </div>
+
                 {/* Embed widgets based on intent outputs */}
                 {msg.data && msg.metadata && (
                   <div className="mt-3 pt-3 border-t border-slate-800 space-y-3">
-                    
+
                     {/* Render mini line trend chart if TREND */}
                     {msg.metadata.intent === 'TREND' && msg.data.chartData && (
                       <div className="h-44 w-full bg-[#111A2E] p-2 rounded-lg border border-slate-800">
@@ -200,12 +300,12 @@ export default function Chat({ onSwitchTab }: ChatProps) {
                             <YAxis stroke="#94A3B8" fontSize={9} />
                             <Tooltip contentStyle={{ backgroundColor: '#161F30', fontSize: 10 }} />
                             {msg.data.yearsList.map((yr: number, idx: number) => (
-                              <Line 
-                                key={yr} 
-                                type="monotone" 
-                                dataKey={`year_${yr}`} 
-                                name={`Year ${yr}`} 
-                                stroke={idx === 0 ? '#00F0FF' : '#FF2A54'} 
+                              <Line
+                                key={yr}
+                                type="monotone"
+                                dataKey={`year_${yr}`}
+                                name={`Year ${yr}`}
+                                stroke={idx === 0 ? '#00F0FF' : '#FF2A54'}
                                 strokeWidth={2}
                                 dot={false}
                               />
@@ -217,8 +317,8 @@ export default function Chat({ onSwitchTab }: ChatProps) {
 
                     {/* Navigation Buttons for Graphs and Maps */}
                     {msg.metadata.intent === 'HOTSPOT' && (
-                      <button 
-                        onClick={() => onSwitchTab('map')} 
+                      <button
+                        onClick={() => onSwitchTab('map')}
                         className="px-3 py-1.5 bg-police-accent hover:bg-police-accent/80 text-white rounded-lg text-xs font-semibold transition-all"
                       >
                         Inspect Hotspots on Full Map View
@@ -226,8 +326,8 @@ export default function Chat({ onSwitchTab }: ChatProps) {
                     )}
 
                     {msg.metadata.intent === 'NETWORK' && (
-                      <button 
-                        onClick={() => onSwitchTab('network', { accusedName: msg.metadata.intent })} 
+                      <button
+                        onClick={() => onSwitchTab('network', { accusedName: msg.metadata.intent })}
                         className="px-3 py-1.5 bg-police-accent hover:bg-police-accent/80 text-white rounded-lg text-xs font-semibold transition-all"
                       >
                         Inspect Relationship Canvas
@@ -235,8 +335,8 @@ export default function Chat({ onSwitchTab }: ChatProps) {
                     )}
 
                     {msg.metadata.intent === 'TIMELINE' && (
-                      <button 
-                        onClick={() => onSwitchTab('timeline', { caseNo: msg.data.caseNo })} 
+                      <button
+                        onClick={() => onSwitchTab('timeline', { caseNo: msg.data.caseNo })}
                         className="px-3 py-1.5 bg-police-accent hover:bg-police-accent/80 text-white rounded-lg text-xs font-semibold transition-all"
                       >
                         Open Case Timeline Detail
@@ -248,9 +348,8 @@ export default function Chat({ onSwitchTab }: ChatProps) {
                       <div className="bg-[#111A2E] p-3 rounded-lg border border-slate-800 space-y-2 text-xs">
                         <div className="flex justify-between items-center">
                           <span className="font-semibold text-slate-300">Recidivism Score:</span>
-                          <span className={`px-2 py-0.5 rounded font-bold ${
-                            msg.data.riskLevel === 'High' ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'
-                          }`}>{msg.data.score}% ({msg.data.riskLevel} Risk)</span>
+                          <span className={`px-2 py-0.5 rounded font-bold ${msg.data.riskLevel === 'High' ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'
+                            }`}>{msg.data.score}% ({msg.data.riskLevel} Risk)</span>
                         </div>
                         <ul className="list-disc pl-4 text-slate-400 space-y-1">
                           {msg.data.factors.map((f: string, i: number) => <li key={i}>{f}</li>)}
@@ -259,7 +358,7 @@ export default function Chat({ onSwitchTab }: ChatProps) {
                     )}
 
                     {/* Explanatory Prompt debugger toggle */}
-                    <button 
+                    <button
                       onClick={() => setSelectedMeta(msg.metadata)}
                       className="text-[10px] text-police-glow hover:underline flex items-center gap-1 font-semibold"
                     >
@@ -286,21 +385,23 @@ export default function Chat({ onSwitchTab }: ChatProps) {
         <div className="p-4 border-t border-slate-800 bg-[#111A2E] flex gap-3">
           <button
             onClick={toggleListening}
-            className={`p-3 rounded-xl border transition-all ${
-              isListening 
-                ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' 
+            className={`p-3 rounded-xl border transition-all ${isListening
+                ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse'
                 : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
+              }`}
             title="Speech-to-Text Input"
           >
             {isListening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
-          
+
           <div className="flex-1 relative">
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                speechInputLanguageRef.current = null;
+              }}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={language === 'kn' ? 'ಅಪರಾಧದ ವಿವರ ಅಥವಾ ಆಜ್ಞೆಯನ್ನು ಇಲ್ಲಿ ನಮೂದಿಸಿ...' : "Search district cases, compare, look up a case no, or check recidivism..."}
               className="w-full bg-[#0B111E] border border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-police-accent focus:ring-1 focus:ring-police-accent"

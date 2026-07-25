@@ -132,15 +132,21 @@ export interface CaseRepository {
     districtId?: number;
     unitId?: number;
     crimeHeadId?: number;
+    crimeSubHeadId?: number;
     year?: number;
     startDate?: string;
     endDate?: string;
+    [key: string]: any;
   }): Promise<Case[]>;
   count(filter?: {
     districtId?: number;
     unitId?: number;
     crimeHeadId?: number;
+    crimeSubHeadId?: number;
     year?: number;
+    startDate?: string;
+    endDate?: string;
+    [key: string]: any;
   }): Promise<number>;
 }
 
