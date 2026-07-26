@@ -1,24 +1,24 @@
-import { GeminiLLMService } from './llm.service';
-import { GeminiEmbeddingService } from './embedding.service';
-import { BrowserSpeechService } from './speech.service';
-import { LocalSemanticSearchService } from './search.service';
-import { LocalPDFGenerator } from './report.service';
-import { LocalPredictionService } from './prediction.service';
+import { CatalystLLMService } from './llm.service';
+import { QuickMLEmbeddingService } from './embedding.service';
+import { CatalystSpeechService } from './speech.service';
+import { QuickMLSemanticSearchService } from './search.service';
+import { SmartBrowzReportService } from './report.service';
+import { CatalystQuickMLPredictionService } from './prediction.service';
 import { 
-  LocalCacheService, 
-  LocalNotificationService, 
-  LocalAuthenticationService, 
-  LocalTranslationService 
+  CatalystCacheService, 
+  CatalystNotificationService, 
+  CatalystAuthenticationService, 
+  CatalystTranslationService 
 } from './other.service';
 
-// Service Instances
-export const llmService = new GeminiLLMService();
-export const embeddingService = new GeminiEmbeddingService();
-export const speechService = new BrowserSpeechService();
-export const semanticSearchService = new LocalSemanticSearchService(embeddingService);
-export const reportService = new LocalPDFGenerator();
-export const predictionService = new LocalPredictionService();
-export const cacheService = new LocalCacheService();
-export const notificationService = new LocalNotificationService();
-export const authenticationService = new LocalAuthenticationService();
-export const translationService = new LocalTranslationService();
+// Catalyst Native Service Instances
+export const llmService = new CatalystLLMService();
+export const embeddingService = new QuickMLEmbeddingService();
+export const speechService = new CatalystSpeechService();
+export const semanticSearchService = new QuickMLSemanticSearchService();
+export const reportService = new SmartBrowzReportService();
+export const predictionService = new CatalystQuickMLPredictionService();
+export const cacheService = new CatalystCacheService();
+export const notificationService = new CatalystNotificationService();
+export const authenticationService = new CatalystAuthenticationService();
+export const translationService = new CatalystTranslationService();

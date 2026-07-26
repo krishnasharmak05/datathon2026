@@ -1,34 +1,31 @@
 import { EmbeddingService } from '../core/services';
-import { GoogleGenAI } from '@google/genai';
 
-export class GeminiEmbeddingService implements EmbeddingService {
-  private ai: GoogleGenAI | null = null;
-
-  constructor() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      this.ai = new GoogleGenAI({ apiKey });
-    }
-  }
-
+export class QuickMLEmbeddingService implements EmbeddingService {
   async getEmbedding(text: string): Promise<number[]> {
-    if (this.ai) {
-      try {
-        const result = await this.ai.models.embedContent({
-          model: 'gemini-embedding-2',
-          contents: text,
-        });
-        if (result.embeddings && result.embeddings[0] && result.embeddings[0].values) {
-          return result.embeddings[0].values;
-        }
-        if ((result as any).embedding && (result as any).embedding.values) {
-          return (result as any).embedding.values;
-        }
-      } catch (error) {
-        console.error('Error fetching Gemini embedding:', error);
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/quickml/embeddings`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_QUICKML_API_KEY || ''}`
+        },
+        body: JSON.stringify({ text })
+      });
+
+      if (!response.ok) {
+        throw new Error(`QuickML Embedding generation failed: ${response.status}`);
       }
+
+      const data = (await response.json()) as any;
+      return data.embedding || [];
+    } catch (error) {
+      console.error('Error getting embedding from QuickML:', error);
+      throw error;
     }
-    return this.getOfflineMockEmbedding(text);
   }
 
   computeCosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -42,43 +39,5 @@ export class GeminiEmbeddingService implements EmbeddingService {
     }
     if (normA === 0 || normB === 0) return 0;
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  private getOfflineMockEmbedding(text: string): number[] {
-    // Generate a simple, deterministic pseudo-embedding based on string character hashes
-    const size = 128; // Smaller dimension for mock similarity
-    const vec = new Array(size).fill(0);
-    const cleanText = text.toLowerCase();
-    
-    // Hash-based mock representation
-    for (let i = 0; i < cleanText.length; i++) {
-      const charCode = cleanText.charCodeAt(i);
-      const index = (charCode + i) % size;
-      vec[index] += 1;
-    }
-
-    // Normalize vector
-    let mag = 0;
-    for (let i = 0; i < size; i++) {
-      mag += vec[i] * vec[i];
-    }
-    mag = Math.sqrt(mag);
-    if (mag > 0) {
-      for (let i = 0; i < size; i++) {
-        vec[i] /= mag;
-      }
-    }
-
-    return vec;
-  }
-}
-
-export class QuickMLEmbeddingService implements EmbeddingService {
-  async getEmbedding(text: string): Promise<number[]> {
-    throw new Error('QuickML Embedding Service is only supported in Zoho Cloud Environment.');
-  }
-
-  computeCosineSimilarity(vecA: number[], vecB: number[]): number {
-    throw new Error('QuickML Embedding Service is only supported in Zoho Cloud Environment.');
   }
 }
