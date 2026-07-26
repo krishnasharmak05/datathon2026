@@ -13,7 +13,7 @@ The following diagram illustrates the Zoho Catalyst native execution flow:
 ```mermaid
 graph TD
     User([User / Police Officer]) -->|1. Natural Language Query| Gateway[Catalyst API Gateway]
-    Gateway -->|2. Route Request| API[Catalyst Function: crime_intel_api]
+    Gateway -->|2. Route Request| Orchestrator
     
     subgraph "Catalyst Function (crime_intel_api)"
         Orchestrator[Conversation Orchestrator]
@@ -26,13 +26,13 @@ graph TD
     end
 
     Orchestrator -->|3. If Kannada: Translate to English| ZiaTrans
-    Orchestrator -->|4. Parse Query (English)| Parser
+    Orchestrator -->|4. Parse Query in English| Parser
     Orchestrator -->|5. Draft Step-by-Step Plan| Planner
     Planner -->|6. Execute Queries via ZCQL| Repo
     
     Repo -->|7. Data Retrieve/Aggregate| DataStore[(Catalyst Data Store)]
     
-    Orchestrator -->|8. Explains Data (English)| ResponseBuilder
+    Orchestrator -->|8. Explains Data in English| ResponseBuilder
     ResponseBuilder -->|9. Summarize Data| CatalystLLM[Catalyst LLM REST API]
     
     Orchestrator -->|10. Translate Explanation to Kannada| ZiaTrans
@@ -90,7 +90,7 @@ CATALYST_SENDER_EMAIL=alerts@karnatakapolice.gov.in
   ```
 - Log in to your Zoho account:
   ```powershell
-  catalyst login --force
+  catalyst login
   ```
 
 ### 1. Install Workspace Dependencies

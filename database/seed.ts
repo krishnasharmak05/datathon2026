@@ -144,6 +144,12 @@ async function seed() {
   const datastore = app.datastore();
   const zcql = app.zcql();
 
+  let accusedCounter = 0;
+  let victimCounter = 0;
+  let complainantCounter = 0;
+  let arrestCounter = 0;
+  let chargesheetCounter = 0;
+
   const tables = [
     'inv_arrestsurrenderaccused',
     'ArrestSurrender',
@@ -406,25 +412,31 @@ async function seed() {
       childBuilders.push(async (caseMasterId: any, generatedDate: string, headVal: number, offVal: number, distVal: number, stVal: number, crtVal: number, accName: string, repeatVal: boolean) => {
         // Complainant
         const compName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
+        complainantCounter++;
         await datastore.table('ComplainantDetails').insertRow({
+          ComplainantID: complainantCounter,
           CaseMasterID: caseMasterId, ComplainantName: compName, AgeYear: getRandomRange(20, 60),
           OccupationID: getRandomRange(1, 6), ReligionID: getRandomRange(1, 5), CasteID: getRandomRange(1, 4), GenderID: getRandomRange(1, 2)
         });
 
         // Victim
         const vicName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
+        victimCounter++;
         await datastore.table('Victim').insertRow({
+          VictimMasterID: victimCounter,
           CaseMasterID: caseMasterId, VictimName: vicName, AgeYear: getRandomRange(18, 55),
           GenderID: getRandomRange(1, 2), VictimPolice: '0'
         });
 
         // Accused
         const accPersonID = repeatVal ? `ACC-R-${REPEAT_ACCUSED_POOL.indexOf(accName) + 1}` : `ACC-U-${caseMasterId}`;
-        const accRow = await datastore.table('Accused').insertRow({
+        accusedCounter++;
+        await datastore.table('Accused').insertRow({
+          AccusedMasterID: accusedCounter,
           CaseMasterID: caseMasterId, AccusedName: accName, AgeYear: getRandomRange(20, 50),
           GenderID: getRandomRange(1, 2), PersonID: accPersonID
         });
-        const accusedMasterId = accRow.ROWID || accRow.AccusedMasterID || caseMasterId;
+        const accusedMasterId = accusedCounter;
 
         // Act & Section
         const mappedSections = SECTIONS.filter(s => {
@@ -444,12 +456,14 @@ async function seed() {
         const isArrested = Math.random() < 0.70;
         if (isArrested) {
           const arrestDate = `${year}-${month}-${String(getRandomRange(Number(day), 28)).padStart(2, '0')}`;
-          const arrRow = await datastore.table('ArrestSurrender').insertRow({
+          arrestCounter++;
+          await datastore.table('ArrestSurrender').insertRow({
+            ArrestSurrenderID: arrestCounter,
             CaseMasterID: caseMasterId, ArrestSurrenderTypeID: getRandomRange(1, 2), ArrestSurrenderDate: arrestDate,
             ArrestSurrenderStateId: 1, ArrestSurrenderDistrictId: distVal, PoliceStationID: stVal, IOID: offVal,
             CourtID: crtVal, AccusedMasterID: accusedMasterId, IsAccused: 1, IsComplainantAccused: 0
           });
-          const arrestId = arrRow.ROWID || arrRow.ArrestSurrenderID || caseMasterId;
+          const arrestId = arrestCounter;
 
           // Junction entry
           await datastore.table('inv_arrestsurrenderaccused').insertRow({
@@ -465,7 +479,9 @@ async function seed() {
         // Chargesheet
         if (statusId >= 2) {
           const csDate = `${year}-${String(Math.min(12, Number(month) + getRandomRange(1, 3))).padStart(2, '0')}-${day}`;
+          chargesheetCounter++;
           await datastore.table('ChargesheetDetails').insertRow({
+            CSID: chargesheetCounter,
             CaseMasterID: caseMasterId, csdate: csDate, cstype: 'A', PolicePersonID: offVal
           });
         }
@@ -479,7 +495,7 @@ async function seed() {
     // Insert Child Records for each case in the batch
     for (let cOffset = 0; cOffset < currentBatchSize; cOffset++) {
       const parentCaseRow = insertedCases[cOffset];
-      const caseMasterId = parentCaseRow.ROWID || parentCaseRow.CaseMasterID || (batchStart + cOffset + 1);
+      const caseMasterId = parentCaseRow.CaseMasterID || parentCaseRow.ROWID || (batchStart + cOffset + 1);
       const caseData = casesBatch[cOffset];
 
       await childBuilders[cOffset](

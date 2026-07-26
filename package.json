@@ -9,7 +9,9 @@
     "dev": "npx concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "build": "npm run build --prefix functions/crime_intel_api && npm run build --prefix client",
     "db:setup": "tsx database/seed.ts",
+    "db:zcql-run": "tsx database/run_zcql_queries.ts",
     "test:regression": "tsx tests/regression_runner.ts"
+    
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
