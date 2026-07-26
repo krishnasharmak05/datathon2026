@@ -1,14 +1,12 @@
 {
-  "project": {
-    "name": "datathon2026",
-    "id": "datathon2026"
+  "client": {
+    "source": "client"
   },
+
   "functions": {
+    "source": "functions",
     "targets": [
       "crime_intel_api"
     ]
-  },
-  "client": {
-    "target": "client"
   }
 }
