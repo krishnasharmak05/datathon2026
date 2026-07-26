@@ -1,0 +1,21 @@
+runners:
+  default-runner:
+    config-id: 2 # Medium configuration (2GB RAM, 1.2 vCPU)
+
+pipeline-runner: default-runner
+
+stages:
+  - name: BuildStage
+    jobs:
+      - name: BuildJob
+        steps:
+          - run: npm install --prefix functions/crime_intel_api
+          - run: npm run build --prefix functions/crime_intel_api
+          - run: npm install --prefix client
+          - run: npm run build --prefix client
+
+  - name: DeployStage
+    jobs:
+      - name: DeployJob
+        steps:
+          - run: catalyst deploy --force

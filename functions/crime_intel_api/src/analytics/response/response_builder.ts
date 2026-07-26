@@ -1,6 +1,6 @@
 import { ApiResponse, ParsedQuery } from '../../core/pipeline';
 import { llmService } from '../../services';
-import { SqlTracer } from '../../db/sqlite.repo';
+import { SqlTracer } from '../../db/sql_tracer';
 
 export class ResponseBuilder {
   async buildResponse(
@@ -92,8 +92,6 @@ export class ResponseBuilder {
       }
     }
 
-    // 2. Extract Explainable AI Metadata (already extracted above)
-
     const confidencePct = `${Math.round(parsed.confidence * 100)}%`;
     const generatedUsing = parsed.pipelineStage === 'deterministic' 
       ? 'Deterministic Regex Parser -> SQL Template Engine'
@@ -103,7 +101,7 @@ export class ResponseBuilder {
 
     const metadata = {
       intent: parsed.intent,
-      dataSource: sqlQuery.length > 0 ? 'SQLite Local Database' : 'In-Memory Service Engine',
+      dataSource: sqlQuery.length > 0 ? 'Zoho Catalyst Data Store' : 'In-Memory Service Engine',
       rowsProcessed,
       confidence: confidencePct,
       generatedUsing,
