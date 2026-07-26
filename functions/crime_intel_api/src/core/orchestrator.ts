@@ -1,9 +1,9 @@
 import { IntentResolutionPipeline } from '../parser/pipeline';
 import { ExecutionPlanner } from '../parser/planner';
 import { responseBuilder } from '../analytics/response/response_builder';
-import { llmService, embeddingService } from '../services';
+import { llmService, embeddingService, translationService, speechService } from '../services';
 import { ApiResponse } from './pipeline';
-import { SqlTracer } from '../db/sqlite.repo';
+import { SqlTracer } from '../db/sql_tracer';
 
 import { analyticsRepository } from '../db';
 
@@ -38,13 +38,20 @@ export class ConversationOrchestrator {
     SqlTracer.clear();
 
     try {
-      // 1. Resolve Intent and Entities
-      const parsedQuery = await this.pipeline.resolve(query);
+      // 1. Kannada input: Translate text query to English before parser
+      let englishQuery = query;
+      if (language === 'kn') {
+        englishQuery = await translationService.translate(query, 'kn', 'en');
+        console.log(`[Orchestrator] Translated query from Kannada to English: "${englishQuery}"`);
+      }
 
-      // 2. Draft Execution Plan
+      // 2. Resolve Intent and Entities
+      const parsedQuery = await this.pipeline.resolve(englishQuery);
+
+      // 3. Draft Execution Plan
       const plan = this.planner.plan(parsedQuery);
       
-      // 3. Composed execution of analytics steps
+      // 4. Composed execution of analytics steps
       let finalData: any = null;
 
       for (const step of plan.steps) {
@@ -126,15 +133,33 @@ export class ConversationOrchestrator {
 
       const executionTime = Date.now() - startTime;
 
-      // 4. Formulate response via ResponseBuilder (integrates LLM translation and formatting)
+      // 5. Formulate response via ResponseBuilder (relying on English generation)
       const response = await responseBuilder.buildResponse(
-        query,
+        englishQuery,
         parsedQuery,
         finalData || { message: 'Query completed with no additional details.' },
         executionTime,
-        language,
+        'en',
         isTerminal
       );
+
+      // 6. Translate Response back to Kannada if required
+      if (language === 'kn') {
+        const translatedText = await translationService.translate(response.textResponse, 'en', 'kn');
+        response.textResponse = translatedText;
+        console.log(`[Orchestrator] Translated response from English to Kannada.`);
+      }
+
+      // 7. Add Voice Response (base64 audio) if requested
+      if (language === 'kn' || isTerminal) {
+        try {
+          const audioBase64 = await speechService.textToSpeech(response.textResponse, language);
+          response.voiceResponse = audioBase64;
+          console.log(`[Orchestrator] Generated Zia text-to-speech audio base64 payload.`);
+        } catch (ttsErr) {
+          console.error('[Orchestrator] TTS generation failed:', ttsErr);
+        }
+      }
 
       return response;
 

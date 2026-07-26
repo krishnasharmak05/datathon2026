@@ -1,62 +1,139 @@
 import { CacheService, NotificationService, AuthenticationService, TranslationService } from '../core/services';
+import catalyst from 'zcatalyst-sdk-node';
 
-// Cache Service (In-Memory Map)
-export class LocalCacheService implements CacheService {
-  private store = new Map<string, { value: any; expiry: number }>();
+export class CatalystCacheService implements CacheService {
+  private getSegment() {
+    const app = catalyst.initialize({});
+    return app.cache().segment();
+  }
 
   async get<T>(key: string): Promise<T | null> {
-    const item = this.store.get(key);
-    if (!item) return null;
-    if (Date.now() > item.expiry) {
-      this.store.delete(key);
+    try {
+      const segment = this.getSegment();
+      const val = await segment.getValue(key);
+      if (!val) return null;
+      return JSON.parse(val) as T;
+    } catch (e) {
+      console.error('Error getting from Catalyst cache:', e);
       return null;
     }
-    return item.value as T;
   }
 
   async set<T>(key: string, value: T, ttlSeconds: number = 300): Promise<void> {
-    const expiry = Date.now() + ttlSeconds * 1000;
-    this.store.set(key, { value, expiry });
+    try {
+      const segment = this.getSegment();
+      const expiryInHours = ttlSeconds / 3600;
+      await segment.put(key, JSON.stringify(value), expiryInHours);
+    } catch (e) {
+      console.error('Error setting in Catalyst cache:', e);
+    }
   }
 
   async delete(key: string): Promise<void> {
-    this.store.delete(key);
+    try {
+      const segment = this.getSegment();
+      await segment.delete(key);
+    } catch (e) {
+      console.error('Error deleting from Catalyst cache:', e);
+    }
   }
 
   async clear(): Promise<void> {
-    this.store.clear();
+    // Cache clearing at segment level is handled via individual key eviction in Node SDK
   }
 }
 
-// Notification Service
-export class LocalNotificationService implements NotificationService {
+export class CatalystNotificationService implements NotificationService {
   async sendPushNotification(userId: string, title: string, body: string): Promise<void> {
-    console.log(`[PUSH NOTIFICATION] To User: ${userId} | Title: ${title} | Body: ${body}`);
+    try {
+      const app = catalyst.initialize({});
+      const push = app.pushNotification();
+      const pushService = typeof push.web === 'function' ? push.web() : (push as any).web;
+      
+      const payload = JSON.stringify({ title, body });
+      await pushService.send_notification(payload, [userId]);
+      console.log(`[Catalyst Push] Notification sent to: ${userId}`);
+    } catch (error) {
+      console.error('Error sending Catalyst push notification:', error);
+    }
   }
 
   async sendEmail(to: string, subject: string, body: string): Promise<void> {
-    console.log(`[MAIL] To: ${to} | Subject: ${subject} | Body: ${body.substring(0, 100)}...`);
-  }
-}
-
-// Authentication Service
-export class LocalAuthenticationService implements AuthenticationService {
-  async verifyToken(token: string): Promise<{ userId: string; username: string; role: string } | null> {
-    if (!token) return null;
-    // Decodes standard mock token (e.g. mock-admin-token or mock-inspector-token)
-    if (token.includes('admin')) {
-      return { userId: 'usr-1', username: 'Superintendent_Rao', role: 'admin' };
+    try {
+      const app = catalyst.initialize({});
+      const email = app.email();
+      
+      await email.sendMail({
+        from_email: process.env.CATALYST_SENDER_EMAIL || 'no-reply@karnatakapolice.gov.in',
+        to_email: [to],
+        subject,
+        content: body,
+        html_mode: body.trim().startsWith('<')
+      });
+      console.log(`[Catalyst Email] Mail sent to: ${to}`);
+    } catch (error) {
+      console.error('Error sending Catalyst email:', error);
     }
-    return { userId: 'usr-2', username: 'Inspector_Gowda', role: 'inspector' };
   }
 }
 
-// Translation Service
-export class LocalTranslationService implements TranslationService {
+export class CatalystAuthenticationService implements AuthenticationService {
+  async verifyToken(token: string): Promise<{ userId: string; username: string; role: string } | null> {
+    try {
+      const app = catalyst.initialize({});
+      const userManagement = app.userManagement();
+      const user = await userManagement.getCurrentUser();
+      
+      if (user) {
+        return {
+          userId: (user as any).user_id,
+          username: (user as any).email_id || 'user',
+          role: (user as any).role_details?.role_name || 'user'
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error verifying Catalyst session:', error);
+      return null;
+    }
+  }
+}
+
+export class CatalystTranslationService implements TranslationService {
   async translate(text: string, sourceLang: 'en' | 'kn', targetLang: 'en' | 'kn'): Promise<string> {
     if (sourceLang === targetLang) return text;
-    
-    // Heuristic translation dictionary for UI elements and typical outputs
+
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/zia/translate`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_ZIA_API_KEY || ''}`
+        },
+        body: JSON.stringify({
+          text,
+          source_language: sourceLang,
+          target_language: targetLang
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Zia Translation failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.translated_text || text;
+    } catch (error: any) {
+      console.warn('Zia Translation failed, using local translation dictionary fallback:', error.message);
+      return this.localTranslationFallback(text, sourceLang, targetLang);
+    }
+  }
+
+  private localTranslationFallback(text: string, sourceLang: 'en' | 'kn', targetLang: 'en' | 'kn'): string {
     const dictKnToEn: Record<string, string> = {
       'ಅಪರಾಧ': 'Crime',
       'ಅಪರಾಧಿ': 'Accused',
