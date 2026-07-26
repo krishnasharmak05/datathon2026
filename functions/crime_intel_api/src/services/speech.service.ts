@@ -1,26 +1,63 @@
 import { SpeechService } from '../core/services';
 
-export class BrowserSpeechService implements SpeechService {
-  async textToSpeech(text: string, language: 'en' | 'kn'): Promise<string> {
-    // Return the text back as a confirmation signal. 
-    // Client-side can directly use the browser's speechSynthesis API (window.speechSynthesis)
-    // using the textResponse returned in the API payload.
-    return `BROWSER_TTS_OK: [lang=${language}] ${text.substring(0, 30)}...`;
-  }
-
+export class CatalystSpeechService implements SpeechService {
   async speechToText(audioBase64: string, language: 'en' | 'kn'): Promise<string> {
-    // Client-side will capture audio via browser speechRecognition API (WebkitSpeechRecognition) 
-    // and send text directly. If audioBase64 is sent, we return a mock transcript.
-    return "Transcribed query text from Browser Speech capture.";
-  }
-}
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/zia/speech-to-text`;
 
-export class ZiaSpeechService implements SpeechService {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_ZIA_API_KEY || ''}`
+        },
+        body: JSON.stringify({
+          audio: audioBase64,
+          language: language === 'kn' ? 'kn-IN' : 'en-US'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Zia Speech-to-Text failed with status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.text || '';
+    } catch (error) {
+      console.error('Error in Zia Speech-to-Text:', error);
+      throw error;
+    }
+  }
+
   async textToSpeech(text: string, language: 'en' | 'kn'): Promise<string> {
-    throw new Error('Zia Speech Service is only supported in Zoho Cloud Environment.');
-  }
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/zia/text-to-speech`;
 
-  async speechToText(audioBase64: string, language: 'en' | 'kn'): Promise<string> {
-    throw new Error('Zia Speech Service is only supported in Zoho Cloud Environment.');
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_ZIA_API_KEY || ''}`
+        },
+        body: JSON.stringify({
+          text,
+          language: language === 'kn' ? 'kn-IN' : 'en-US'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Zia Text-to-Speech failed with status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.audio_base64 || '';
+    } catch (error) {
+      console.error('Error in Zia Text-to-Speech:', error);
+      throw error;
+    }
   }
 }

@@ -1,24 +1,99 @@
 import { PredictionService } from '../core/services';
 import { accusedRepository, caseRepository, chargesheetRepository } from '../db';
 
-export class LocalPredictionService implements PredictionService {
+export class CatalystQuickMLPredictionService implements PredictionService {
   
-  // 1. Time-Series Forecasting: Simple Exponential Smoothing & Moving Average
   async forecastCrimeCount(historicalCounts: { date: string; count: number }[], periods: number): Promise<{ date: string; count: number }[]> {
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/quickml/prediction/forecast`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_QUICKML_API_KEY || ''}`
+        },
+        body: JSON.stringify({ historicalCounts, periods })
+      });
+
+      if (!response.ok) {
+        throw new Error(`QuickML forecast failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.forecast || [];
+    } catch (error) {
+      console.warn('Falling back to local exponential smoothing forecast:', error);
+      return this.localForecast(historicalCounts, periods);
+    }
+  }
+
+  async predictRecidivism(accusedId: string): Promise<{ score: number; riskLevel: string; factors: string[] }> {
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/quickml/prediction/recidivism`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_QUICKML_API_KEY || ''}`
+        },
+        body: JSON.stringify({ accusedId })
+      });
+
+      if (!response.ok) {
+        throw new Error(`QuickML recidivism prediction failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.prediction || { score: 10, riskLevel: 'Low', factors: [] };
+    } catch (error) {
+      console.warn('Falling back to local recidivism heuristic:', error);
+      return this.localRecidivism(accusedId);
+    }
+  }
+
+  async predictCaseDuration(crimeSubHeadId: number, districtId: number): Promise<{ durationDays: number; confidence: number }> {
+    try {
+      const projectId = process.env.CATALYST_PROJECT_ID;
+      const apiDomain = process.env.CATALYST_API_DOMAIN || 'https://api.catalyst.zoho.com';
+      const endpoint = `${apiDomain}/v1/project/${projectId}/quickml/prediction/duration`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.CATALYST_QUICKML_API_KEY || ''}`
+        },
+        body: JSON.stringify({ crimeSubHeadId, districtId })
+      });
+
+      if (!response.ok) {
+        throw new Error(`QuickML duration prediction failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as any;
+      return data.prediction || { durationDays: 90, confidence: 60 };
+    } catch (error) {
+      console.warn('Falling back to local case duration baseline:', error);
+      return this.localCaseDuration(crimeSubHeadId, districtId);
+    }
+  }
+
+  private async localForecast(historicalCounts: { date: string; count: number }[], periods: number): Promise<{ date: string; count: number }[]> {
     if (historicalCounts.length === 0) {
       return Array.from({ length: periods }, (_, i) => ({ date: `Forecast Day ${i+1}`, count: 5 }));
     }
 
-    // Sort historical counts by date
     const sorted = [...historicalCounts].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    // Moving Average (window of 3)
     const windowSize = Math.min(3, sorted.length);
-    let lastValue = sorted[sorted.length - 1].count;
-    
-    // Simple Exponential Smoothing (alpha = 0.3)
     const alpha = 0.3;
     let sesLevel = sorted[0].count;
+
     for (let i = 1; i < sorted.length; i++) {
       sesLevel = alpha * sorted[i].count + (1 - alpha) * sesLevel;
     }
@@ -27,12 +102,10 @@ export class LocalPredictionService implements PredictionService {
     const lastDate = new Date(sorted[sorted.length - 1].date);
 
     for (let p = 1; p <= periods; p++) {
-      // Calculate future date
       const nextDate = new Date(lastDate);
       nextDate.setMonth(nextDate.getMonth() + p);
-      const dateStr = nextDate.toISOString().slice(0, 7); // YYYY-MM format
+      const dateStr = nextDate.toISOString().slice(0, 7);
 
-      // Combine MA and SES trends
       const rollingSum = sorted.slice(-windowSize).reduce((acc, curr) => acc + curr.count, 0);
       const ma = rollingSum / windowSize;
       const predictedVal = Math.round(0.6 * sesLevel + 0.4 * ma);
@@ -41,27 +114,21 @@ export class LocalPredictionService implements PredictionService {
         date: dateStr,
         count: Math.max(0, predictedVal)
       });
-      
-      // Update historical stream for rolling window simulation
       sorted.push({ date: dateStr, count: predictedVal });
     }
 
     return forecasted;
   }
 
-  // 2. Repeat Offender Recidivism Prediction: Rule-based Scoring
-  async predictRecidivism(accusedId: string): Promise<{ score: number; riskLevel: string; factors: string[] }> {
-    // Look up accused details and history
+  private async localRecidivism(accusedId: string): Promise<{ score: number; riskLevel: string; factors: string[] }> {
     const history = await accusedRepository.getByPersonId(accusedId);
-    
     if (history.length === 0) {
       return { score: 10, riskLevel: 'Low', factors: ['No previous records in database'] };
     }
 
-    let score = 20; // baseline
+    let score = 20;
     const factors: string[] = [];
 
-    // Factor 1: Previous offence count
     const count = history.length;
     if (count > 3) {
       score += 40;
@@ -73,8 +140,6 @@ export class LocalPredictionService implements PredictionService {
       factors.push('First time offender, low previous records');
     }
 
-    // Factor 2: Gravity of previous offenses
-    // Look up cases linked to these offenses
     let heinousCount = 0;
     for (const record of history) {
       const caseObj = await caseRepository.getById(record.CaseMasterID);
@@ -88,14 +153,12 @@ export class LocalPredictionService implements PredictionService {
       factors.push(`Prior involvement in ${heinousCount} heinous crime(s)`);
     }
 
-    // Factor 3: Age risk profile (younger age correlates with higher recidivism statistically)
     const primaryAccused = history[0];
     if (primaryAccused.AgeYear && primaryAccused.AgeYear < 30) {
       score += 15;
       factors.push(`Age profile: ${primaryAccused.AgeYear} years (Youth cohort)`);
     }
 
-    // Cap score at 99%
     const finalScore = Math.min(99, score);
     let riskLevel = 'Low';
     if (finalScore >= 75) riskLevel = 'High';
@@ -108,16 +171,13 @@ export class LocalPredictionService implements PredictionService {
     };
   }
 
-  // 3. Case Duration Prediction (Regression Baseline)
-  async predictCaseDuration(crimeSubHeadId: number, districtId: number): Promise<{ durationDays: number; confidence: number }> {
-    // We compute a baseline using the average historical time between CrimeRegisteredDate and csdate for chargesheeted cases
-    // grouped by crimeSubHeadId.
+  private async localCaseDuration(crimeSubHeadId: number, districtId: number): Promise<{ durationDays: number; confidence: number }> {
     const cases = await caseRepository.list({ crimeHeadId: crimeSubHeadId });
     let totalDays = 0;
     let count = 0;
 
     for (const c of cases) {
-      if (c.CaseStatusID === 2) { // Chargesheeted
+      if (c.CaseStatusID === 2) {
         const cs = await chargesheetRepository.getByCaseId(c.CaseMasterID);
         if (cs && cs.csdate) {
           const registered = new Date(c.CrimeRegisteredDate).getTime();
@@ -131,16 +191,13 @@ export class LocalPredictionService implements PredictionService {
       }
     }
 
-    // Baseline fallback if no historical chargesheets exist
     let avgDays = count > 0 ? Math.round(totalDays / count) : 90;
-    
-    // Custom factor: district workload offset
     const districtCasesCount = await caseRepository.count({ districtId });
     if (districtCasesCount > 100) {
-      avgDays += 15; // Higher workload police district extends case duration
+      avgDays += 15;
     }
 
-    const confidence = count > 5 ? 85 : 60; // Higher confidence if more samples
+    const confidence = count > 5 ? 85 : 60;
 
     return {
       durationDays: avgDays,

@@ -1,12 +1,4 @@
-import sqlite3 from 'sqlite3';
-import { open, Database } from 'sqlite';
-import * as fs from 'fs';
-import * as path from 'path';
-
-// Define directories
-const DB_DIR = __dirname;
-const DB_FILE = path.join(DB_DIR, 'police_fir.db');
-const SCHEMA_FILE = path.join(DB_DIR, 'schema.sql');
+import catalyst from 'zcatalyst-sdk-node';
 
 const DISTRICTS = [
   { id: 1, name: 'Bengaluru City', lat: 12.9716, lng: 77.5946 },
@@ -108,27 +100,27 @@ const LAST_NAMES = [
 ];
 
 const FACTS_TEMPLATES = {
-  1: [ // Murder / Attempt
+  1: [
     "On {date}, the accused {accused} picked up a quarrel with the victim over a property dispute. In a fit of rage, the accused assaulted the victim with a sharp weapon, causing severe injuries leading to death.",
     "Complainant reported that on the night of {date}, a group of individuals including {accused} forcefully entered their house and attacked their brother with iron rods with the intention of murdering him."
   ],
-  2: [ // Theft / House Breaking
+  2: [
     "The complainant stated that they locked their house and went out. Upon returning on {date}, they found the lock broken and gold ornaments weighing 50g along with cash stolen from the locker.",
     "On {date}, at Kalasipalya market, the accused was caught red-handed while stealing a mobile phone and wallet from a passenger boarding the bus."
   ],
-  3: [ // Cybercrime
+  3: [
     "The complainant received a call from an unknown person claiming to be a bank manager. Under the pretext of KYC update, the caller obtained OTP and fraudulently transferred Rs 75,000 from the complainant's account.",
     "The complainant reported that an unknown person created a fake social media profile using their photos and details, and sent obscene messages to their contacts."
   ],
-  4: [ // Narcotics
+  4: [
     "Acting on a tip-off, the police team raided a spot near Bangalore University on {date} and apprehended the accused carrying 2.5 kg of contraband Ganja in a backpack.",
     "The accused was found selling synthetic MDMA drugs to college students near Mangalore beach. Police seized 15 grams of MDMA crystals from their possession."
   ],
-  5: [ // Cheating
+  5: [
     "The accused collected Rs 12 Lakhs from the complainant promising to secure a government job in KSRTC. However, the accused failed to provide the job and refused to return the money.",
     "The accused sold a piece of land to the complainant using forged documents, claiming sole ownership, while the property was already mortgaged to a bank."
   ],
-  6: [ // Rioting
+  6: [
     "During a local festival procession on {date}, two groups clashed near the temple. The accused {accused} along with others formed an unlawful assembly, shouted slogans, threw stones and damaged public buses.",
     "A group of protesters gathered illegally outside the circle office, holding weapons and blocking traffic, violating the section 144 order."
   ]
@@ -147,219 +139,237 @@ function getRandomFloat(min: number, max: number): number {
 }
 
 async function seed() {
-  console.log('Starting DB Seeding...');
-  
-  if (fs.existsSync(DB_FILE)) {
-    fs.unlinkSync(DB_FILE);
-    console.log('Deleted existing database file.');
+  console.log('Initializing Zoho Catalyst DB Seeding...');
+  const app = catalyst.initialize();
+  const datastore = app.datastore();
+  const zcql = app.zcql();
+
+  const tables = [
+    'inv_arrestsurrenderaccused',
+    'ArrestSurrender',
+    'Inv_OccuranceTime',
+    'ChargesheetDetails',
+    'ActSectionAssociation',
+    'ComplainantDetails',
+    'Victim',
+    'Accused',
+    'CaseMaster',
+    'CrimeHeadActSection',
+    'Section',
+    'Act',
+    'CrimeSubHead',
+    'CrimeHead',
+    'Employee',
+    'Unit',
+    'Court',
+    'District',
+    'State',
+    'Designation',
+    'Rank',
+    'UnitType',
+    'CaseStatusMaster',
+    'GravityOffence',
+    'CaseCategory',
+    'OccupationMaster',
+    'CasteMaster',
+    'ReligionMaster'
+  ];
+
+  // 1. Clear Existing Data
+  console.log('Clearing old database records...');
+  for (const t of tables) {
+    try {
+      await zcql.executeZCQLQuery(`DELETE FROM ${t}`);
+      console.log(`Cleared table: ${t}`);
+    } catch (e: any) {
+      console.log(`Info: Skip clear for ${t} (might be empty or missing): ${e.message}`);
+    }
   }
 
-  const db = await open({
-    filename: DB_FILE,
-    driver: sqlite3.Database
-  });
+  // 2. Seed Master Lookup Tables
+  console.log('Seeding lookup tables...');
+  await datastore.table('State').insertRow({ StateID: 1, StateName: 'Karnataka', NationalityID: 1, Active: 1 });
+  
+  await datastore.table('District').insertRows(DISTRICTS.map(d => ({
+    DistrictID: d.id, DistrictName: d.name, StateID: 1, Active: 1
+  })));
 
-  // Execute Schema SQL
-  const schemaSql = fs.readFileSync(SCHEMA_FILE, 'utf8');
-  await db.exec(schemaSql);
-  console.log('Database tables created from schema.sql');
+  const courtsList = [];
+  for (const d of DISTRICTS) {
+    courtsList.push({ CourtID: d.id, CourtName: `District Court - ${d.name}`, DistrictID: d.id, StateID: 1, Active: 1 });
+    courtsList.push({ CourtID: d.id + 100, CourtName: `Judicial Magistrate First Class - ${d.name}`, DistrictID: d.id, StateID: 1, Active: 1 });
+  }
+  await datastore.table('Court').insertRows(courtsList);
 
-  // Begin Transaction
-  await db.exec('BEGIN TRANSACTION');
+  await datastore.table('UnitType').insertRows([
+    { UnitTypeID: 1, UnitTypeName: 'Police Station', CityDistState: 'City' },
+    { UnitTypeID: 2, UnitTypeName: 'Circle Office', CityDistState: 'District' }
+  ]);
 
-  try {
-    // 1. Seed State
-    await db.run(`INSERT INTO State (StateID, StateName, NationalityID, Active) VALUES (1, 'Karnataka', 1, 1)`);
+  await datastore.table('Unit').insertRows(POLICE_STATIONS.map(u => ({
+    UnitID: u.id, UnitName: u.name, TypeID: 1, ParentUnit: null, NationalityID: 1, StateID: 1, DistrictID: u.districtId, Active: 1
+  })));
 
-    // 2. Seed Districts
-    for (const d of DISTRICTS) {
-      await db.run(`INSERT INTO District (DistrictID, DistrictName, StateID, Active) VALUES (?, ?, 1, 1)`, d.id, d.name);
-    }
+  const ranks = [
+    { id: 1, name: 'Police Constable', hierarchy: 6 },
+    { id: 2, name: 'Head Constable', hierarchy: 5 },
+    { id: 3, name: 'Assistant Sub-Inspector', hierarchy: 4 },
+    { id: 4, name: 'Sub-Inspector', hierarchy: 3 },
+    { id: 5, name: 'Inspector', hierarchy: 2 },
+    { id: 6, name: 'Deputy Superintendent', hierarchy: 1 },
+  ];
+  await datastore.table('Rank').insertRows(ranks.map(r => ({
+    RankID: r.id, RankName: r.name, Hierarchy: r.hierarchy, Active: 1
+  })));
 
-    // 3. Seed Courts
-    for (const d of DISTRICTS) {
-      await db.run(`INSERT INTO Court (CourtID, CourtName, DistrictID, StateID, Active) VALUES (?, ?, ?, 1, 1)`, d.id, `District Court - ${d.name}`, d.id);
-      await db.run(`INSERT INTO Court (CourtID, CourtName, DistrictID, StateID, Active) VALUES (?, ?, ?, 1, 1)`, d.id + 100, `Judicial Magistrate First Class - ${d.name}`, d.id);
-    }
+  const designations = [
+    { id: 1, name: 'Investigating Officer', sort: 1 },
+    { id: 2, name: 'Station House Officer', sort: 2 },
+    { id: 3, name: 'Writer', sort: 3 },
+  ];
+  await datastore.table('Designation').insertRows(designations.map(ds => ({
+    DesignationID: ds.id, DesignationName: ds.name, Active: 1, SortOrder: ds.sort
+  })));
 
-    // 4. Seed UnitType
-    await db.run(`INSERT INTO UnitType (UnitTypeID, UnitTypeName, CityDistState) VALUES (1, 'Police Station', 'City')`);
-    await db.run(`INSERT INTO UnitType (UnitTypeID, UnitTypeName, CityDistState) VALUES (2, 'Circle Office', 'District')`);
-
-    // 5. Seed Units
-    for (const u of POLICE_STATIONS) {
-      await db.run(`INSERT INTO Unit (UnitID, UnitName, TypeID, ParentUnit, NationalityID, StateID, DistrictID, Active) VALUES (?, ?, 1, NULL, 1, 1, ?, 1)`, u.id, u.name, u.districtId);
-    }
-
-    // 6. Seed Ranks
-    const ranks = [
-      { id: 1, name: 'Police Constable', hierarchy: 6 },
-      { id: 2, name: 'Head Constable', hierarchy: 5 },
-      { id: 3, name: 'Assistant Sub-Inspector', hierarchy: 4 },
-      { id: 4, name: 'Sub-Inspector', hierarchy: 3 },
-      { id: 5, name: 'Inspector', hierarchy: 2 },
-      { id: 6, name: 'Deputy Superintendent', hierarchy: 1 },
-    ];
-    for (const r of ranks) {
-      await db.run(`INSERT INTO Rank (RankID, RankName, Hierarchy, Active) VALUES (?, ?, ?, 1)`, r.id, r.name, r.hierarchy);
-    }
-
-    // 7. Seed Designations
-    const designations = [
-      { id: 1, name: 'Investigating Officer', sort: 1 },
-      { id: 2, name: 'Station House Officer', sort: 2 },
-      { id: 3, name: 'Writer', sort: 3 },
-    ];
-    for (const ds of designations) {
-      await db.run(`INSERT INTO Designation (DesignationID, DesignationName, Active, SortOrder) VALUES (?, ?, 1, ?)`, ds.id, ds.name, ds.sort);
-    }
-
-    // 8. Seed Employees (Officers)
-    const employeesCount = 40;
-    const employeeIds: number[] = [];
-    for (let i = 1; i <= employeesCount; i++) {
-      const fName = getRandomElement(FIRST_NAMES);
-      const lName = getRandomElement(LAST_NAMES);
-      const name = `${fName} ${lName}`;
-      const districtId = getRandomElement(DISTRICTS).id;
-      const unit = getRandomElement(POLICE_STATIONS.filter(u => u.districtId === districtId)) || POLICE_STATIONS[0];
-      const rankId = getRandomRange(1, 5);
-      const desigId = rankId >= 4 ? 2 : 1; // SI or Inspector are SHO
-      const kgid = `KG-${20000 + i}`;
-      const dob = `${1970 + getRandomRange(0, 25)}-0${getRandomRange(1, 9)}-${10 + getRandomRange(0, 18)}`;
-      const apptDate = `${2000 + getRandomRange(0, 20)}-0${getRandomRange(1, 9)}-${10 + getRandomRange(0, 18)}`;
-      
-      await db.run(
-        `INSERT INTO Employee (EmployeeID, DistrictID, UnitID, RankID, DesignationID, KGID, FirstName, EmployeeDOB, GenderID, BloodGroupID, PhysicallyChallenged, AppointmentDate) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-        i, districtId, unit.id, rankId, desigId, kgid, name, dob, getRandomRange(1, 2), getRandomRange(1, 4), apptDate
-      );
-      employeeIds.push(i);
-    }
-
-    // 9. Seed CaseCategory
-    await db.run(`INSERT INTO CaseCategory (CaseCategoryID, LookupValue) VALUES (1, 'FIR')`);
-    await db.run(`INSERT INTO CaseCategory (CaseCategoryID, LookupValue) VALUES (2, 'UDR')`);
-    await db.run(`INSERT INTO CaseCategory (CaseCategoryID, LookupValue) VALUES (3, 'Zero FIR')`);
-    await db.run(`INSERT INTO CaseCategory (CaseCategoryID, LookupValue) VALUES (4, 'PAR')`);
-
-    // 10. Seed GravityOffence
-    await db.run(`INSERT INTO GravityOffence (GravityOffenceID, LookupValue) VALUES (1, 'Heinous')`);
-    await db.run(`INSERT INTO GravityOffence (GravityOffenceID, LookupValue) VALUES (2, 'Non-Heinous')`);
-
-    // 11. Seed CaseStatusMaster
-    await db.run(`INSERT INTO CaseStatusMaster (CaseStatusID, CaseStatusName) VALUES (1, 'Under Investigation')`);
-    await db.run(`INSERT INTO CaseStatusMaster (CaseStatusID, CaseStatusName) VALUES (2, 'Charge Sheeted')`);
-    await db.run(`INSERT INTO CaseStatusMaster (CaseStatusID, CaseStatusName) VALUES (3, 'Closed')`);
-
-    // 12. Seed ReligionMaster
-    const religions = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Jain'];
-    for (let rIdx = 0; rIdx < religions.length; rIdx++) {
-      await db.run(`INSERT INTO ReligionMaster (ReligionID, ReligionName) VALUES (?, ?)`, rIdx + 1, religions[rIdx]);
-    }
-
-    // 13. Seed CasteMaster
-    const castes = ['General', 'OBC', 'SC', 'ST'];
-    for (let cIdx = 0; cIdx < castes.length; cIdx++) {
-      await db.run(`INSERT INTO CasteMaster (caste_master_id, caste_master_name) VALUES (?, ?)`, cIdx + 1, castes[cIdx]);
-    }
-
-    // 14. Seed OccupationMaster
-    const occupations = ['Farmer', 'Business Owner', 'Government Employee', 'Private Employee', 'Unemployed', 'Student'];
-    for (let oIdx = 0; oIdx < occupations.length; oIdx++) {
-      await db.run(`INSERT INTO OccupationMaster (OccupationID, OccupationName) VALUES (?, ?)`, oIdx + 1, occupations[oIdx]);
-    }
-
-    // 15. Seed CrimeHead
-    for (const h of CRIME_HEADS) {
-      await db.run(`INSERT INTO CrimeHead (CrimeHeadID, CrimeGroupName, Active) VALUES (?, ?, 1)`, h.id, h.name);
-    }
-
-    // 16. Seed CrimeSubHead
-    for (const sh of CRIME_SUB_HEADS) {
-      await db.run(`INSERT INTO CrimeSubHead (CrimeSubHeadID, CrimeHeadID, CrimeHeadName, SeqID) VALUES (?, ?, ?, ?)`, sh.id, sh.headId, sh.name, sh.seq);
-    }
-
-    // 17. Seed Act
-    for (const a of ACTS) {
-      await db.run(`INSERT INTO Act (ActCode, ActDescription, ShortName, Active) VALUES (?, ?, ?, 1)`, a.code, a.desc, a.short);
-    }
-
-    // 18. Seed Section
-    for (const s of SECTIONS) {
-      await db.run(`INSERT INTO Section (ActCode, SectionCode, SectionDescription, Active) VALUES (?, ?, ?, 1)`, s.actCode, s.code, s.desc);
-    }
-
-    // 19. Seed CrimeHeadActSection
-    const mapping = [
-      { headId: 1, actCode: 'IPC', section: '302' },
-      { headId: 1, actCode: 'IPC', section: '307' },
-      { headId: 1, actCode: 'IPC', section: '324' },
-      { headId: 1, actCode: 'IPC', section: '363' },
-      { headId: 2, actCode: 'IPC', section: '379' },
-      { headId: 2, actCode: 'IPC', section: '380' },
-      { headId: 2, actCode: 'IPC', section: '392' },
-      { headId: 3, actCode: 'IT_ACT', section: '66C' },
-      { headId: 3, actCode: 'IT_ACT', section: '66D' },
-      { headId: 4, actCode: 'NDPS', section: '20' },
-      { headId: 4, actCode: 'NDPS', section: '22' },
-      { headId: 5, actCode: 'IPC', section: '420' },
-      { headId: 5, actCode: 'IPC', section: '448' },
-      { headId: 6, actCode: 'IPC', section: '143' },
-      { headId: 6, actCode: 'IPC', section: '147' },
-      { headId: 6, actCode: 'KP_ACT', section: '92' }
-    ];
-    for (const m of mapping) {
-      await db.run(`INSERT INTO CrimeHeadActSection (CrimeHeadID, ActCode, SectionCode) VALUES (?, ?, ?)`, m.headId, m.actCode, m.section);
-    }
-
-    // 20. Seed CaseMaster & associated entities (Complainant, Victim, Accused, Arrests, Chargesheets)
-    // We will generate 1000 cases to provide rich statistical databases.
-    const casesCount = 1000;
+  // Generate 40 Employees
+  console.log('Seeding employees...');
+  const employees = [];
+  const employeeIds: number[] = [];
+  for (let i = 1; i <= 40; i++) {
+    const fName = getRandomElement(FIRST_NAMES);
+    const lName = getRandomElement(LAST_NAMES);
+    const name = `${fName} ${lName}`;
+    const districtId = getRandomElement(DISTRICTS).id;
+    const unit = getRandomElement(POLICE_STATIONS.filter(u => u.districtId === districtId)) || POLICE_STATIONS[0];
+    const rankId = getRandomRange(1, 5);
+    const desigId = rankId >= 4 ? 2 : 1;
+    const kgid = `KG-${20000 + i}`;
+    const dob = `${1970 + getRandomRange(0, 25)}-0${getRandomRange(1, 9)}-${10 + getRandomRange(0, 18)}`;
+    const apptDate = `${2000 + getRandomRange(0, 20)}-0${getRandomRange(1, 9)}-${10 + getRandomRange(0, 18)}`;
     
-    // Track case numbers for repeat offender linking
-    const crimeTypes = CRIME_SUB_HEADS;
-    
-    for (let c = 1; c <= casesCount; c++) {
-      const subHead = getRandomElement(crimeTypes);
+    employees.push({
+      EmployeeID: i, DistrictID: districtId, UnitID: unit.id, RankID: rankId, DesignationID: desigId,
+      KGID: kgid, FirstName: name, EmployeeDOB: dob, GenderID: getRandomRange(1, 2), BloodGroupID: getRandomRange(1, 4),
+      PhysicallyChallenged: 0, AppointmentDate: apptDate
+    });
+    employeeIds.push(i);
+  }
+  await datastore.table('Employee').insertRows(employees);
+
+  await datastore.table('CaseCategory').insertRows([
+    { CaseCategoryID: 1, LookupValue: 'FIR' },
+    { CaseCategoryID: 2, LookupValue: 'UDR' },
+    { CaseCategoryID: 3, LookupValue: 'Zero FIR' },
+    { CaseCategoryID: 4, LookupValue: 'PAR' }
+  ]);
+
+  await datastore.table('GravityOffence').insertRows([
+    { GravityOffenceID: 1, LookupValue: 'Heinous' },
+    { GravityOffenceID: 2, LookupValue: 'Non-Heinous' }
+  ]);
+
+  await datastore.table('CaseStatusMaster').insertRows([
+    { CaseStatusID: 1, CaseStatusName: 'Under Investigation' },
+    { CaseStatusID: 2, CaseStatusName: 'Charge Sheeted' },
+    { CaseStatusID: 3, CaseStatusName: 'Closed' }
+  ]);
+
+  const religions = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Jain'];
+  await datastore.table('ReligionMaster').insertRows(religions.map((r, i) => ({
+    ReligionID: i + 1, ReligionName: r
+  })));
+
+  const castes = ['General', 'OBC', 'SC', 'ST'];
+  await datastore.table('CasteMaster').insertRows(castes.map((c, i) => ({
+    caste_master_id: i + 1, caste_master_name: c
+  })));
+
+  const occupations = ['Farmer', 'Business Owner', 'Government Employee', 'Private Employee', 'Unemployed', 'Student'];
+  await datastore.table('OccupationMaster').insertRows(occupations.map((o, i) => ({
+    OccupationID: i + 1, OccupationName: o
+  })));
+
+  await datastore.table('CrimeHead').insertRows(CRIME_HEADS.map(h => ({
+    CrimeHeadID: h.id, CrimeGroupName: h.name, Active: 1
+  })));
+
+  await datastore.table('CrimeSubHead').insertRows(CRIME_SUB_HEADS.map(sh => ({
+    CrimeSubHeadID: sh.id, CrimeHeadID: sh.headId, CrimeHeadName: sh.name, SeqID: sh.seq
+  })));
+
+  await datastore.table('Act').insertRows(ACTS.map(a => ({
+    ActCode: a.code, ActDescription: a.desc, ShortName: a.short, Active: 1
+  })));
+
+  await datastore.table('Section').insertRows(SECTIONS.map(s => ({
+    ActCode: s.actCode, SectionCode: s.code, SectionDescription: s.desc, Active: 1
+  })));
+
+  const mapping = [
+    { headId: 1, actCode: 'IPC', section: '302' },
+    { headId: 1, actCode: 'IPC', section: '307' },
+    { headId: 1, actCode: 'IPC', section: '324' },
+    { headId: 1, actCode: 'IPC', section: '363' },
+    { headId: 2, actCode: 'IPC', section: '379' },
+    { headId: 2, actCode: 'IPC', section: '380' },
+    { headId: 2, actCode: 'IPC', section: '392' },
+    { headId: 3, actCode: 'IT_ACT', section: '66C' },
+    { headId: 3, actCode: 'IT_ACT', section: '66D' },
+    { headId: 4, actCode: 'NDPS', section: '20' },
+    { headId: 4, actCode: 'NDPS', section: '22' },
+    { headId: 5, actCode: 'IPC', section: '420' },
+    { headId: 5, actCode: 'IPC', section: '448' },
+    { headId: 6, actCode: 'IPC', section: '143' },
+    { headId: 6, actCode: 'IPC', section: '147' },
+    { headId: 6, actCode: 'KP_ACT', section: '92' }
+  ];
+  await datastore.table('CrimeHeadActSection').insertRows(mapping.map(m => ({
+    CrimeHeadID: m.headId, ActCode: m.actCode, SectionCode: m.section
+  })));
+
+  // 3. Generate and Batched Bulk-Insert 1000 Case Records
+  console.log('Seeding 1000 cases in bulk batches...');
+  const totalCases = 1000;
+  const batchSize = 100;
+
+  for (let batchStart = 0; batchStart < totalCases; batchStart += batchSize) {
+    const currentBatchSize = Math.min(batchSize, totalCases - batchStart);
+    const casesBatch: any[] = [];
+    const childBuilders: { (caseMasterId: any, generatedDate: string, headId: number, officerId: number, districtId: number, stationId: number, courtId: number, accusedName: string, isRepeat: boolean): Promise<any> }[] = [];
+
+    for (let cOffset = 0; cOffset < currentBatchSize; cOffset++) {
+      const caseGlobalIndex = batchStart + cOffset + 1;
+      const subHead = getRandomElement(CRIME_SUB_HEADS);
       const headId = subHead.headId;
       
-      const categoryId = Math.random() > 0.05 ? 1 : 2; // 95% FIR, 5% UDR
+      const categoryId = Math.random() > 0.05 ? 1 : 2;
       const gravityId = (subHead.name === 'Murder' || subHead.name === 'Attempt to Murder' || subHead.name === 'NDPS Trafficking') ? 1 : 2;
       
-      // Select station & matching district
       const station = getRandomElement(POLICE_STATIONS);
       const districtId = station.districtId;
       const districtObj = DISTRICTS.find(d => d.id === districtId)!;
       
-      // Assign case officer
-      const officersAtStation = employeeIds; // Simplify
-      const officerId = getRandomElement(officersAtStation);
+      const officerId = getRandomElement(employeeIds);
       
       const year = getRandomRange(2020, 2026);
       const month = String(getRandomRange(1, 12)).padStart(2, '0');
       const day = String(getRandomRange(1, 28)).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
       
-      // Unique serial
-      const serialStr = String(c).padStart(5, '0');
-      // Format: 1 digit category (1=FIR, 2=UDR) + 4 digit district + 4 digit station + 4 digit year + 5 digit running serial
+      const serialStr = String(caseGlobalIndex).padStart(5, '0');
       const crimeNo = `${categoryId}${String(districtId).padStart(4, '0')}${String(station.id).padStart(4, '0')}${year}${serialStr}`;
       const caseNo = `${year}${serialStr}`;
       
-      // Add GPS with offset from district center to create hotspots
       const latOffset = getRandomFloat(-0.06, 0.06);
       const lngOffset = getRandomFloat(-0.06, 0.06);
       const lat = districtObj.lat + latOffset;
       const lng = districtObj.lng + lngOffset;
       
-      // Build brief facts
       const templates = FACTS_TEMPLATES[headId as keyof typeof FACTS_TEMPLATES] || FACTS_TEMPLATES[2];
       let brief = getRandomElement(templates);
       
-      // Assign accused
       let accusedName = '';
-      let isRepeat = Math.random() < 0.25; // 25% repeat offender probability
+      const isRepeat = Math.random() < 0.25;
       if (isRepeat) {
         accusedName = getRandomElement(REPEAT_ACCUSED_POOL);
       } else {
@@ -368,113 +378,130 @@ async function seed() {
       
       brief = brief.replace(/{date}/g, dateStr).replace(/{accused}/g, accusedName);
       
-      // Insert CaseMaster
-      const statusId = year <= 2024 ? (Math.random() > 0.3 ? 2 : 3) : 1; // older cases are chargesheeted/closed
+      const statusId = year <= 2024 ? (Math.random() > 0.3 ? 2 : 3) : 1;
       const courtId = districtId;
-      
-      const result = await db.run(
-        `INSERT INTO CaseMaster (CrimeNo, CaseNo, CrimeRegisteredDate, PolicePersonID, PoliceStationID, CaseCategoryID, GravityOffenceID, CrimeMajorHeadID, CrimeMinorHeadID, CaseStatusID, CourtID, IncidentFromDate, IncidentToDate, InfoReceivedPSDate, latitude, longitude, BriefFacts) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        crimeNo, caseNo, dateStr, officerId, station.id, categoryId, gravityId, headId, subHead.id, statusId, courtId, dateStr, dateStr, dateStr, lat, lng, brief
-      );
-      
-      const caseId = result.lastID!;
 
-      // Insert Complainant
-      const compName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
-      await db.run(
-        `INSERT INTO ComplainantDetails (CaseMasterID, ComplainantName, AgeYear, OccupationID, ReligionID, CasteID, GenderID) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        caseId, compName, getRandomRange(20, 60), getRandomRange(1, 6), getRandomRange(1, 5), getRandomRange(1, 4), getRandomRange(1, 2)
-      );
-
-      // Insert Victim
-      const vicName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
-      await db.run(
-        `INSERT INTO Victim (CaseMasterID, VictimName, AgeYear, GenderID, VictimPolice) 
-         VALUES (?, ?, ?, ?, '0')`,
-        caseId, vicName, getRandomRange(18, 55), getRandomRange(1, 2)
-      );
-
-      // Insert Accused
-      const accAge = getRandomRange(20, 50);
-      const accGender = getRandomRange(1, 2);
-      const accPersonID = isRepeat ? `ACC-R-${REPEAT_ACCUSED_POOL.indexOf(accusedName) + 1}` : `ACC-U-${caseId}`;
-      const accResult = await db.run(
-        `INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID) 
-         VALUES (?, ?, ?, ?, ?)`,
-        caseId, accusedName, accAge, accGender, accPersonID
-      );
-      const accusedId = accResult.lastID!;
-
-      // Insert ActSectionAssociation (link mapping sections)
-      const mappedSections = SECTIONS.filter(s => {
-        const correspondingMapping = mapping.filter(m => m.headId === headId);
-        return correspondingMapping.some(m => m.actCode === s.actCode && m.section === s.code);
+      casesBatch.push({
+        CaseMasterID: caseGlobalIndex,
+        CrimeNo: crimeNo,
+        CaseNo: caseNo,
+        CrimeRegisteredDate: dateStr,
+        PolicePersonID: officerId,
+        PoliceStationID: station.id,
+        CaseCategoryID: categoryId,
+        GravityOffenceID: gravityId,
+        CrimeMajorHeadID: headId,
+        CrimeMinorHeadID: subHead.id,
+        CaseStatusID: statusId,
+        CourtID: courtId,
+        IncidentFromDate: dateStr,
+        IncidentToDate: dateStr,
+        InfoReceivedPSDate: dateStr,
+        latitude: lat,
+        longitude: lng,
+        BriefFacts: brief
       });
-      
-      let seqNum = 1;
-      for (const ms of mappedSections) {
-        await db.run(
-          `INSERT INTO ActSectionAssociation (CaseMasterID, ActID, SectionID, ActOrderID, SectionOrderID) 
-           VALUES (?, ?, ?, ?, ?)`,
-          caseId, ms.actCode, ms.code, seqNum, seqNum
-        );
-        seqNum++;
-      }
 
-      // Insert ArrestSurrender for a portion of cases
-      const isArrested = Math.random() < 0.70;
-      if (isArrested) {
-        const arrestDate = `${year}-${month}-${String(getRandomRange(Number(day), 28)).padStart(2, '0')}`;
-        const arrResult = await db.run(
-          `INSERT INTO ArrestSurrender (CaseMasterID, ArrestSurrenderTypeID, ArrestSurrenderDate, ArrestSurrenderStateId, ArrestSurrenderDistrictId, PoliceStationID, IOID, CourtID, AccusedMasterID, IsAccused, IsComplainantAccused) 
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 1, 0)`,
-          caseId, getRandomRange(1, 2), arrestDate, districtId, station.id, officerId, courtId, accusedId
-        );
-        const arrestId = arrResult.lastID!;
+      // Prepare child records insertion factory function
+      childBuilders.push(async (caseMasterId: any, generatedDate: string, headVal: number, offVal: number, distVal: number, stVal: number, crtVal: number, accName: string, repeatVal: boolean) => {
+        // Complainant
+        const compName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
+        await datastore.table('ComplainantDetails').insertRow({
+          CaseMasterID: caseMasterId, ComplainantName: compName, AgeYear: getRandomRange(20, 60),
+          OccupationID: getRandomRange(1, 6), ReligionID: getRandomRange(1, 5), CasteID: getRandomRange(1, 4), GenderID: getRandomRange(1, 2)
+        });
 
-        // Add to junction
-        await db.run(
-          `INSERT INTO inv_arrestsurrenderaccused (ArrestSurrenderID, AccusedMasterID) 
-           VALUES (?, ?)`,
-          arrestId, accusedId
-        );
-      }
+        // Victim
+        const vicName = `${getRandomElement(FIRST_NAMES)} ${getRandomElement(LAST_NAMES)}`;
+        await datastore.table('Victim').insertRow({
+          CaseMasterID: caseMasterId, VictimName: vicName, AgeYear: getRandomRange(18, 55),
+          GenderID: getRandomRange(1, 2), VictimPolice: '0'
+        });
 
-      // Insert Occurrence Time
-      await db.run(
-        `INSERT INTO Inv_OccuranceTime (CaseMasterID, IncidentFromDate, IncidentToDate) 
-         VALUES (?, ?, ?)`,
-        caseId, dateStr, dateStr
-      );
+        // Accused
+        const accPersonID = repeatVal ? `ACC-R-${REPEAT_ACCUSED_POOL.indexOf(accName) + 1}` : `ACC-U-${caseMasterId}`;
+        const accRow = await datastore.table('Accused').insertRow({
+          CaseMasterID: caseMasterId, AccusedName: accName, AgeYear: getRandomRange(20, 50),
+          GenderID: getRandomRange(1, 2), PersonID: accPersonID
+        });
+        const accusedMasterId = accRow.ROWID || accRow.AccusedMasterID || caseMasterId;
 
-      // Insert Chargesheet for closed or chargesheeted cases
-      if (statusId >= 2) {
-        const csDate = `${year}-${String(Math.min(12, Number(month) + getRandomRange(1, 3))).padStart(2, '0')}-${day}`;
-        await db.run(
-          `INSERT INTO ChargesheetDetails (CaseMasterID, csdate, cstype, PolicePersonID) 
-           VALUES (?, ?, 'A', ?)`,
-          caseId, csDate, officerId
-        );
-      }
+        // Act & Section
+        const mappedSections = SECTIONS.filter(s => {
+          const correspondingMapping = mapping.filter(m => m.headId === headVal);
+          return correspondingMapping.some(m => m.actCode === s.actCode && m.section === s.code);
+        });
+        
+        let seqNum = 1;
+        for (const ms of mappedSections) {
+          await datastore.table('ActSectionAssociation').insertRow({
+            CaseMasterID: caseMasterId, ActID: ms.actCode, SectionID: ms.code, ActOrderID: seqNum, SectionOrderID: seqNum
+          });
+          seqNum++;
+        }
+
+        // Arrest
+        const isArrested = Math.random() < 0.70;
+        if (isArrested) {
+          const arrestDate = `${year}-${month}-${String(getRandomRange(Number(day), 28)).padStart(2, '0')}`;
+          const arrRow = await datastore.table('ArrestSurrender').insertRow({
+            CaseMasterID: caseMasterId, ArrestSurrenderTypeID: getRandomRange(1, 2), ArrestSurrenderDate: arrestDate,
+            ArrestSurrenderStateId: 1, ArrestSurrenderDistrictId: distVal, PoliceStationID: stVal, IOID: offVal,
+            CourtID: crtVal, AccusedMasterID: accusedMasterId, IsAccused: 1, IsComplainantAccused: 0
+          });
+          const arrestId = arrRow.ROWID || arrRow.ArrestSurrenderID || caseMasterId;
+
+          // Junction entry
+          await datastore.table('inv_arrestsurrenderaccused').insertRow({
+            ArrestSurrenderID: arrestId, AccusedMasterID: accusedMasterId
+          });
+        }
+
+        // Occurrence time
+        await datastore.table('Inv_OccuranceTime').insertRow({
+          CaseMasterID: caseMasterId, IncidentFromDate: generatedDate, IncidentToDate: generatedDate
+        });
+
+        // Chargesheet
+        if (statusId >= 2) {
+          const csDate = `${year}-${String(Math.min(12, Number(month) + getRandomRange(1, 3))).padStart(2, '0')}-${day}`;
+          await datastore.table('ChargesheetDetails').insertRow({
+            CaseMasterID: caseMasterId, csdate: csDate, cstype: 'A', PolicePersonID: offVal
+          });
+        }
+      });
     }
 
-    await db.exec('COMMIT');
-    console.log(`Seeding complete! Seeded:
-      - 1 State
-      - ${DISTRICTS.length} Districts
-      - ${POLICE_STATIONS.length} Units (Police Stations)
-      - ${employeesCount} Employees (Officers)
-      - ${casesCount} CaseMaster records, along with Victims, Accused, and Complainants.
-    `);
+    // Insert CaseMaster Batch
+    console.log(`Inserting CaseMaster batch: ${batchStart} to ${batchStart + currentBatchSize}`);
+    const insertedCases = await datastore.table('CaseMaster').insertRows(casesBatch);
 
-  } catch (error) {
-    await db.exec('ROLLBACK');
-    console.error('Seeding failed! Rollback triggered.', error);
-  } finally {
-    await db.close();
+    // Insert Child Records for each case in the batch
+    for (let cOffset = 0; cOffset < currentBatchSize; cOffset++) {
+      const parentCaseRow = insertedCases[cOffset];
+      const caseMasterId = parentCaseRow.ROWID || parentCaseRow.CaseMasterID || (batchStart + cOffset + 1);
+      const caseData = casesBatch[cOffset];
+
+      await childBuilders[cOffset](
+        caseMasterId,
+        caseData.CrimeRegisteredDate,
+        caseData.CrimeMajorHeadID,
+        caseData.PolicePersonID,
+        districtObjId(caseData.PoliceStationID),
+        caseData.PoliceStationID,
+        caseData.CourtID,
+        caseData.BriefFacts.includes(REPEAT_ACCUSED_POOL[0]) ? REPEAT_ACCUSED_POOL[0] : caseData.BriefFacts.split(' ').slice(-2).join(' '), // parse accused name
+        caseData.BriefFacts.includes('Rajesh Kumar') || caseData.BriefFacts.includes('Imran Khan') || caseData.BriefFacts.includes('Manjunath S') || caseData.BriefFacts.includes('Vikram Gowda') || caseData.BriefFacts.includes('Sunil Naik')
+      );
+    }
   }
+
+  console.log('Seeding fully completed successfully!');
+}
+
+function districtObjId(stationId: number): number {
+  const st = POLICE_STATIONS.find(p => p.id === stationId);
+  return st ? st.districtId : 1;
 }
 
 seed().catch(console.error);
