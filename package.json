@@ -1,0 +1,25 @@
+{
+  "name": "datathon2026-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && npm install --prefix client && npm install --prefix functions/crime_intel_api",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix functions/crime_intel_api",
+    "dev": "npx concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "build": "npm run build --prefix functions/crime_intel_api && npm run build --prefix client",
+    "db:setup": "tsx database/seed.ts",
+    "test:regression": "tsx tests/regression_runner.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@google/genai": "^2.13.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  }
+}
