@@ -6,6 +6,14 @@ The platform is migrated entirely to a **100% Zoho Catalyst-native architecture*
 
 ---
 
+## 🎥 Project Demo
+
+Watch the walkthrough of the AI Crime Intelligence Platform demonstrating natural language query parsing, ZCQL execution, multilingual speech/translation, and dynamic reports:
+
+<video src="docs/video.mp4" controls width="100%"></video>
+
+---
+
 ## 🏛️ System Architecture
 
 The following diagram illustrates the Zoho Catalyst native execution flow:
